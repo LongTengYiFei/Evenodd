@@ -11,8 +11,12 @@
 #include <math.h>
 
 #define FILE_RIGHT (S_IRUSR | S_IWUSR | S_IXUSR |  S_IRGRP |  S_IWGRP |  S_IROTH | S_IWOTH)
+#define HANG_JIAO_YAN_WRITE_BUF_SIZE (1024*1024*1024)
 char* folderPrefix = "disk_";
 char* metaFilePath = "meta.txt"; // <file_origin_path, P, paddingZeroNum>
+char** origin_strip_names = NULL;
+char* hang_strip_name = NULL;
+char* dui_jiao_xian_strip_name = NULL;
 
 void usage(){
     printf("./evenodd write <file_name> <p>\n");
@@ -167,6 +171,35 @@ int getMetaNums(){
     return ans;
 }
 
+void stripNameInit(int p){
+    int file_id = getMetaNums();
+    char file_id_str[128]={0};
+    sprintf(file_id_str, "%d", file_id);
+    
+    origin_strip_names=(char**)malloc(sizeof(char*)*p);
+    hang_strip_name = (char*)malloc(sizeof(char)*128);
+    dui_jiao_xian_strip_name = (char*)malloc(sizeof(char)*128);
+    char* strip_name = NULL;
+
+    char p_str[128]={0};
+    for(int i=0; i<=p+1; i++){
+        if(i == p){
+            strip_name = hang_strip_name;
+        }else if(i == (p+1)){
+            strip_name = dui_jiao_xian_strip_name;
+        }else{
+            origin_strip_names[i] = (char*)malloc(sizeof(char)*128);
+            strip_name = origin_strip_names[i];
+        }
+        sprintf(p_str, "%d", i);
+        memset(strip_name, 0, 128);
+        memcpy(strip_name, folderPrefix, strlen(folderPrefix));
+        memcpy(strip_name+strlen(folderPrefix), p_str, strlen(p_str));
+        memcpy(strip_name+strlen(folderPrefix)+strlen(p_str), "/", 1);
+        memcpy(strip_name+strlen(folderPrefix)+strlen(p_str)+1, file_id_str, strlen(file_id_str));
+    }
+}
+
 void writeOriginStrip(char* file_path, int p){
     //数据列
     int fd_source = open(file_path, O_RDONLY);
@@ -175,30 +208,14 @@ void writeOriginStrip(char* file_path, int p){
         exit(-1);
     }
 
-    int file_id = getMetaNums();
-    char file_id_str[128]={0};
-    sprintf(file_id_str, "%d", file_id);
-
     long strip_size = stripSize(file_path, p);
-    char strip_name[128]={0};
-    char p_str[128]={0};
-    
     for(int i=0; i<=p-1; i++){
-        memset(p_str, 0, 128);
-        sprintf(p_str, "%d", i);
-
-        memset(strip_name, 0, 128);
-        memcpy(strip_name, folderPrefix, strlen(folderPrefix));
-        memcpy(strip_name+strlen(folderPrefix), p_str, strlen(p_str));
-        memcpy(strip_name+strlen(folderPrefix)+strlen(p_str), "/", 1);
-        memcpy(strip_name+strlen(folderPrefix)+strlen(p_str)+1, file_id_str, strlen(file_id_str));
-
-        int fd_strip = open(strip_name, O_RDWR | O_CREAT, FILE_RIGHT);
+        int fd_strip = open(origin_strip_names[i], O_RDWR | O_CREAT, FILE_RIGHT);
         if(fd_strip < 0){
             printf("strip %d error, %s\n", i, strerror(errno));
             exit(-1);
         }
-        if(truncate(strip_name, strip_size) < 0){
+        if(truncate(origin_strip_names[i], strip_size) < 0){
             printf("truncate error, %d, %s, errno %d\n", i, strerror(errno), errno);
             exit(-1);
         }
@@ -208,28 +225,82 @@ void writeOriginStrip(char* file_path, int p){
             printf("sendfile error, %d, %s, errno %d\n", i, strerror(errno), errno);
             exit(-1);
         }
+        close(fd_strip);
     }
 }
 
-void writeRedundancyFile1(char* file_path, int p){
-    //行校验列
+void XOR(char* buf1, char*buf2, int len){
+    for(int i=0; i<=len-1; i++)
+        buf1[i] = buf1[i]^buf2[i]; 
 }
 
-void writeRedundancyFile2(char* file_path, int p){
+void writeRedundancyFileHang(char* file_path, int p){
+    //行校验列
+    unsigned char* write_buf=(unsigned char*)malloc(HANG_JIAO_YAN_WRITE_BUF_SIZE);
+    memset(write_buf, 0, HANG_JIAO_YAN_WRITE_BUF_SIZE);
+    unsigned char* read_buf=(unsigned char*)malloc(HANG_JIAO_YAN_WRITE_BUF_SIZE);
+    memset(read_buf, 0, HANG_JIAO_YAN_WRITE_BUF_SIZE);
+    
+    int* fds=(int*)malloc(p*sizeof(int));
+    for(int i=0; i<=p-1; i++){
+        fds[i] = open(origin_strip_names[i], O_RDONLY);
+        if(fds[i] < 0){
+            printf("open %s error, %s\n", origin_strip_names[i], strerror(errno)); exit(-1);
+        }
+    }
+
+    int hangFd = open(hang_strip_name, O_WRONLY | O_CREAT | O_APPEND, FILE_RIGHT);
+    if(hangFd < 0){
+        printf("open %s error, %s\n", hang_strip_name, strerror(errno)); exit(-1);
+    }
+
+    while(1){
+        int end = 0;
+        int max_n = 0;
+        for(int i=0; i<=p-1; i++){
+            int n = read(fds[i], read_buf, HANG_JIAO_YAN_WRITE_BUF_SIZE);
+            max_n = n>max_n?n:max_n;
+            if(i==0 && n==0){
+                end = 1;
+                break;
+            }
+            XOR(write_buf, read_buf, n);
+        }
+        if(end==1)
+            break;
+        write(hangFd, write_buf, max_n);
+    }
+
+    long hang_strip_size = getFileSize(hang_strip_name);
+    long strip_size = stripSize(file_path, p);
+    if(hang_strip_size != strip_size){
+        printf("hang strip generate error, size not valid\n"); exit(-1);
+    }
+
+    for(int i=0; i<=p-1; i++)
+        close(fds[i]);
+    close(hangFd);
+}
+
+void writeRedundancyFileDuiJiaoXian(char* file_path, int p){
     //对角线校验列
 }
 
 void evenoddWrite(char* file_path, int p){
     dataDiskFolderCheckAndMake(p);
+    stripNameInit(p);
     writeOriginStrip(file_path, p);
-    writeRedundancyFile1(file_path, p);
-    writeRedundancyFile2(file_path, p);
+    writeRedundancyFileHang(file_path, p);
+    writeRedundancyFileDuiJiaoXian(file_path, p);
 }
 
 int main(int argc, char** argv){
     // unit test
-
-
+    dataDiskFolderCheckAndMake(3);
+    stripNameInit(3);
+    writeOriginStrip("/home/cyf/evenodd/testfile1", 3);
+    writeRedundancyFileHang("/home/cyf/evenodd/testfile1", 3);
+    return 0;
     // main
     if(argc < 2){
         usage();
