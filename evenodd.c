@@ -10,13 +10,16 @@
 #include <sys/sendfile.h>
 #include <math.h>
 
+//#define RELEASE
 #define FILE_RIGHT (S_IRUSR | S_IWUSR | S_IXUSR |  S_IRGRP |  S_IWGRP |  S_IROTH | S_IWOTH)
 #define HANG_JIAO_YAN_WRITE_BUF_SIZE (1024*1024*1024)
+#define GB_SIZE (1024*1024*1024)
 char* folderPrefix = "disk_";
 char* metaFilePath = "meta.txt"; // <file_origin_path, P, paddingZeroNum>
 char** origin_strip_names = NULL;
 char* hang_strip_name = NULL;
 char* dui_jiao_xian_strip_name = NULL;
+char* tmp_syndrome_file_path = "syndrome";
 
 void usage(){
     printf("./evenodd write <file_name> <p>\n");
@@ -234,8 +237,8 @@ void XOR(char* buf1, char*buf2, int len){
         buf1[i] = buf1[i]^buf2[i]; 
 }
 
+//行校验列
 void writeRedundancyFileHang(char* file_path, int p){
-    //行校验列
     unsigned char* write_buf=(unsigned char*)malloc(HANG_JIAO_YAN_WRITE_BUF_SIZE);
     memset(write_buf, 0, HANG_JIAO_YAN_WRITE_BUF_SIZE);
     unsigned char* read_buf=(unsigned char*)malloc(HANG_JIAO_YAN_WRITE_BUF_SIZE);
@@ -245,13 +248,15 @@ void writeRedundancyFileHang(char* file_path, int p){
     for(int i=0; i<=p-1; i++){
         fds[i] = open(origin_strip_names[i], O_RDONLY);
         if(fds[i] < 0){
-            printf("open %s error, %s\n", origin_strip_names[i], strerror(errno)); exit(-1);
+            printf("open %s error, %s\n", origin_strip_names[i], strerror(errno)); 
+            exit(-1);
         }
     }
 
     int hangFd = open(hang_strip_name, O_WRONLY | O_CREAT | O_APPEND, FILE_RIGHT);
     if(hangFd < 0){
-        printf("open %s error, %s\n", hang_strip_name, strerror(errno)); exit(-1);
+        printf("open %s error, %s\n", hang_strip_name, strerror(errno)); 
+        exit(-1);
     }
 
     while(1){
@@ -274,16 +279,151 @@ void writeRedundancyFileHang(char* file_path, int p){
     long hang_strip_size = getFileSize(hang_strip_name);
     long strip_size = stripSize(file_path, p);
     if(hang_strip_size != strip_size){
-        printf("hang strip generate error, size not valid\n"); exit(-1);
+        printf("hang strip generate error, size not valid\n"); 
+        exit(-1);
     }
 
     for(int i=0; i<=p-1; i++)
         close(fds[i]);
     close(hangFd);
+    free(fds);free(write_buf);free(read_buf);
 }
 
+//Syndrome
+void writeSyndromeCellFile(char* file_path, int p){
+    int fd_syn = open(tmp_syndrome_file_path, O_RDWR | O_APPEND | O_CREAT, FILE_RIGHT);
+    unsigned char* write_buf = (unsigned char*)malloc(GB_SIZE);
+    memset(write_buf, 0, GB_SIZE);
+    unsigned char* read_buf = (unsigned char*)malloc(GB_SIZE);
+    memset(read_buf, 0, GB_SIZE);
+    
+    int* fds=(int*)malloc(p*sizeof(int));
+    long cell_size = cellSize(file_path, p);
+    long rest_size = cell_size;
+    for(int col=1; col<=p-1; col++){
+        int row = p-col-1;
+        fds[col] = open(origin_strip_names[col], O_RDONLY);
+        lseek(fds[col], row*cell_size, SEEK_SET);    
+    }
+
+    while(1){
+        int end = 0;
+        int n = 0;
+        for(int i=1; i<=p-1; i++){
+            n = read(fds[i], read_buf, rest_size<GB_SIZE?rest_size:GB_SIZE);
+            if(n == 0){
+                end = 1;
+                break;
+            }
+            XOR(write_buf, read_buf, n);
+        }
+        if(end==1)
+            break;
+        rest_size -= n;
+        write(fd_syn, write_buf, n);
+    }
+
+    off_t syndrome_size;
+    syndrome_size = lseek(fd_syn, 0, SEEK_END);
+    if(syndrome_size != cell_size){
+        printf("syndrome cell file generate error, size not valid\n"); 
+        exit(-1);
+    }
+
+    for(int i=0; i<=p-1; i++)
+        close(fds[i]);
+    close(fd_syn);
+    free(fds);free(write_buf);free(read_buf);
+}
+
+void removeTmpSyndromeFile(){
+    if(remove(tmp_syndrome_file_path) < 0){
+        printf("remove syn fail\n");
+        exit(-1);
+    }
+}
+
+
+int mapToStripIndex(int row, int stripNumber){
+    //<第几行, 使用到的第几个strip> -> strip index
+    if(stripNumber > (row+1))
+        return stripNumber;
+    else
+        return stripNumber-1;         
+}
+
+int mapToCellIndex(int row, int stripNumber, int p){
+    //顺着strip往下推，推到第几个格子
+    //stripNumber从1开始, row从0开始
+    return (p+row-stripNumber)%(p-1);
+}
+
+//对角线校验列  
 void writeRedundancyFileDuiJiaoXian(char* file_path, int p){
-    //对角线校验列
+    writeSyndromeCellFile(file_path, p);
+    unsigned char* write_buf = (unsigned char*)malloc(GB_SIZE);
+    unsigned char* read_buf = (unsigned char*)malloc(GB_SIZE);
+
+    int synFd = open(tmp_syndrome_file_path, O_RDONLY, FILE_RIGHT);
+    if(synFd < 0){
+        printf("open %s error, %s\n", tmp_syndrome_file_path, strerror(errno)); 
+        exit(-1);
+    }
+
+    int duiFd = open(dui_jiao_xian_strip_name, O_WRONLY | O_CREAT | O_APPEND, FILE_RIGHT);
+    if(duiFd < 0){
+        printf("open %s error, %s\n", dui_jiao_xian_strip_name, strerror(errno)); 
+        exit(-1);
+    }
+
+    int* fds=(int*)malloc(p*sizeof(int));
+    for(int i=0; i<=p-1; i++){
+        fds[i] = open(origin_strip_names[i], O_RDONLY);
+    }
+    
+    long cell_size = cellSize(file_path, p);
+    for(int i=0; i<=p-2; i++){
+        // strip文件offset推到指定的位置去
+        for(int j=1; j<=p-1; j++){
+            int strip_index = mapToStripIndex(i, j);
+            lseek(fds[strip_index], mapToCellIndex(i, j, p)*cell_size, SEEK_SET);
+        }
+        // syndrome文件offset回到起点
+        lseek(synFd, 0, SEEK_SET);
+
+        long rest_size = cell_size;
+        while(1){
+            int end = 0;
+            int n = 0;
+            //read strip
+            for(int i=1; i<=p-1; i++){
+                n = read(fds[i], read_buf, rest_size<GB_SIZE?rest_size:GB_SIZE);
+                if(n == 0){
+                    end = 1;
+                    break;
+                }
+                XOR(write_buf, read_buf, n);
+            }
+            if(end==1)
+                break;
+            rest_size -= n;
+            
+            //read syndrom
+            n = read(synFd, read_buf, rest_size<GB_SIZE?rest_size:GB_SIZE);
+            XOR(write_buf, read_buf, n);
+
+            //write
+            write(duiFd, write_buf, n);
+        }
+    }
+
+    close(duiFd);
+    close(synFd);
+    free(write_buf);
+    free(read_buf);
+    for(int i=0; i<=p-1; i++)   
+        close(fds[i]);
+    removeTmpSyndromeFile();
 }
 
 void evenoddWrite(char* file_path, int p){
@@ -296,11 +436,7 @@ void evenoddWrite(char* file_path, int p){
 
 int main(int argc, char** argv){
     // unit test
-    dataDiskFolderCheckAndMake(3);
-    stripNameInit(3);
-    writeOriginStrip("/home/cyf/evenodd/testfile1", 3);
-    writeRedundancyFileHang("/home/cyf/evenodd/testfile1", 3);
-    return 0;
+
     // main
     if(argc < 2){
         usage();
