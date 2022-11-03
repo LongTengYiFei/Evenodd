@@ -9,6 +9,7 @@
 #include <string.h>
 #include <sys/sendfile.h>
 #include <math.h>
+#include <stdbool.h>
 
 //#define RELEASE
 #define FILE_RIGHT (S_IRUSR | S_IWUSR | S_IXUSR |  S_IRGRP |  S_IWGRP |  S_IROTH | S_IWOTH)
@@ -47,6 +48,7 @@ int getMeta(char* file_name, char* meta_buf){
         printf("getMeta fopen error!\n");
         exit(-1);
     }
+    int index = 0;
     while (!feof(fp))
     {
         fgets(meta_buf, 1024, fp);  //读取一行
@@ -59,8 +61,9 @@ int getMeta(char* file_name, char* meta_buf){
         }
         if(find == 1){
             fclose(fp);
-            return 0;
+            return index;
         }
+        index++;
     }
     fclose(fp);
     return -1;
@@ -174,8 +177,7 @@ int getMetaNums(){
     return ans;
 }
 
-void stripNameInit(int p){
-    int file_id = getMetaNums();
+void stripNameInit(int p, int file_id){
     char file_id_str[128]={0};
     sprintf(file_id_str, "%d", file_id);
     
@@ -428,10 +430,60 @@ void writeRedundancyFileDuiJiaoXian(char* file_path, int p){
 
 void evenoddWrite(char* file_path, int p){
     dataDiskFolderCheckAndMake(p);
-    stripNameInit(p);
+    stripNameInit(p, getMetaNums());
     writeOriginStrip(file_path, p);
     writeRedundancyFileHang(file_path, p);
     writeRedundancyFileDuiJiaoXian(file_path, p);
+}
+
+/*
+    丢失总结：
+        1) 两个数据列
+        2) 一个数据列，一个行校验列
+        3) 一个数据列，一个对角线(Diagonal)校验列
+        4) 两个校验列
+        5) 丢失三个列或以上，不可恢复
+*/
+int existFile(const char* file_name){
+    char meta_buf[128] = {0};
+    if(getMeta(file_name, meta_buf) == -1)
+        return false;
+    return true;
+}
+
+int lostNum(const char* file_name){  
+    // Todo 怎么合理地统计丢失的strip信息呢?
+    char* meta_buf = (char*)malloc(sizeof(char) * 256);
+    int file_id = getMeta(file_name, meta_buf);
+    int p = getPrimeFromMetaTxt(file_name);
+    stripNameInit(p, file_id);
+
+    int lost_num = 0;
+    for(int i=0; i<=p-1; i++){
+        //如果访问不到这个列，说明，要么列文件丢了，要么整个disk目录丢了
+        if(access(origin_strip_names[i], F_OK)  < 0)
+            lost_num ++ ;
+    }
+    if(access(hang_strip_name, F_OK)  < 0)
+            lost_num ++ ;
+    if(access(dui_jiao_xian_strip_name, F_OK)  < 0)
+            lost_num ++ ;
+
+    return lost_num;
+}
+
+void evenoddRead(const char* file_name, const char* save_as){
+    if(!existFile(file_name)){
+        printf("File does not exist!\n");
+        exit(-1);
+    }
+
+    if(lostNum(file_name) > 2){
+        printf("File corrupted!\n");
+        exit(-1);
+    }
+    //file name是存的时候的名字
+    //save as是读的时候另存为的名字，这里另存为的地方应该是和evenodd同目录的地方
 }
 
 int main(int argc, char** argv){
@@ -450,8 +502,7 @@ int main(int argc, char** argv){
         evenoddWrite(argv[2], prime);
     }
     else if(strcmp(operation_type, "read") == 0){
-        //todo
-        ;
+        evenoddRead(argv[2], argv[3]);
     }
     else if(strcmp(operation_type, "repair") == 0){
         //todo
