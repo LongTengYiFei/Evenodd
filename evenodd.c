@@ -16,16 +16,16 @@
 #define HANG_JIAO_YAN_WRITE_BUF_SIZE (1024*1024*1024)
 #define GB_SIZE (1024*1024*1024)
 
-char* folderPrefix = "disk_";
-char* metaFilePath = "meta.txt"; // <file_origin_path, P, paddingZeroNum>
-char* tmp_syndrome_file_path = "syndrome"; // used for write
+char* folderPrefix = "./disk_";
+char* metaFilePath = "./meta.txt"; // <file_origin_path, P, paddingZeroNum>
+char* tmp_syndrome_file_path = "./syndrome"; // used for write
 
 // used for a file read
 char** origin_strip_names = NULL;
 char* horizontal_strip_name = NULL;
 char* diagonal_strip_name = NULL;
-char* formula_5_tmp_S_cell_file_path = "S_cell_5";
-char* formula_7_tmp_S_cell_file_path = "S_cell_7";
+char* formula_5_tmp_S_cell_file_path = "./S_cell_5";
+char* formula_7_tmp_S_cell_file_path = "./S_cell_7";
 char** formula_8_tmp_S0s = NULL;
 char** formula_9_tmp_S1s = NULL;
 int lost_index_i = -1;
@@ -126,12 +126,12 @@ int getPaddingZeroFromMetaTxt(char* file_name){
     return ans;
 }
 
-int cellNum(int p){
+int cellSumNum(int p){
     return p*(p-1);
 }
 
 long cellSize(char* file_name, int p){
-    double cn = cellNum(p);
+    double cn = cellSumNum(p);
     double si = getFileSize(file_name);
     return ceil(si / cn);
 }
@@ -141,7 +141,11 @@ long stripSize(char* file_name, int p){
 }
 
 int lastStripPaddingZeroNum(char* file_name, int p){
-    return stripSize(file_name, p) - getFileSize(file_name) % stripSize(file_name, p);
+    long strip_size = stripSize(file_name, p);
+    long file_size = getFileSize(file_name);
+    if(file_size % strip_size == 0)
+        return 0;
+    return strip_size - (file_size % strip_size);
 }   
 
 void dataDiskFolderCheckAndMake(int p){
@@ -174,6 +178,30 @@ void metaTxtCheckAndMake(){
     close(fd);
 }
 
+void saveFileMeta(const char* meta_database_file_path, const char* file_path, int prime){
+    int fd = open(meta_database_file_path, O_RDWR | O_APPEND);
+    if(fd < 0){
+        printf("打开元数据数据库失败, %s\n", strerror(errno));
+        exit(-1);
+    }
+
+    char prime_s[16] = {0};
+    sprintf(prime_s, "%d", prime);
+
+    char pad_s[16] = {0};
+    sprintf(pad_s, "%d", lastStripPaddingZeroNum(file_path, prime));
+    
+
+    write(fd, file_path, strlen(file_path));
+    write(fd, " ", 1);
+
+    write(fd, prime_s, strlen(prime_s));
+    write(fd, " ", 1);
+    
+    write(fd, pad_s, strlen(pad_s));
+    write(fd, "\n", 1);
+}
+
 int getMetaNums(){
     if(getFileSize(metaFilePath) == 0)
         return 0;
@@ -183,6 +211,7 @@ int getMetaNums(){
         printf("getMeta fopen error!\n");
         exit(-1);
     }
+
     char meta_buf[128]={0};
     int ans = 0;
     while (!feof(fp)){
@@ -190,16 +219,17 @@ int getMetaNums(){
         ans++;
     }
     fclose(fp);
-    return ans;
+    // 减去一个空行
+    return ans - 1;
 }
 
 void stripNameInit(int p, int file_id){
     char file_id_str[128]={0};
     sprintf(file_id_str, "%d", file_id);
     
-    origin_strip_names=(char**)malloc(sizeof(char*)*p);
-    horizontal_strip_name = (char*)malloc(sizeof(char)*128);
-    diagonal_strip_name = (char*)malloc(sizeof(char)*128);
+    origin_strip_names=(char**)malloc(sizeof(char*) * p);
+    horizontal_strip_name = (char*)malloc(sizeof(char) * 128);
+    diagonal_strip_name = (char*)malloc(sizeof(char) * 128);
     char* strip_name = NULL;
 
     char p_str[128]={0};
@@ -209,7 +239,7 @@ void stripNameInit(int p, int file_id){
         }else if(i == (p+1)){
             strip_name = diagonal_strip_name;
         }else{
-            origin_strip_names[i] = (char*)malloc(sizeof(char)*128);
+            origin_strip_names[i] = (char*)malloc(sizeof(char) * 128);
             strip_name = origin_strip_names[i];
         }
         sprintf(p_str, "%d", i);
@@ -230,6 +260,7 @@ void writeOriginStrip(char* file_path, int p){
     }
 
     long strip_size = stripSize(file_path, p);
+    
     for(int i=0; i<=p-1; i++){
         int fd_strip = open(origin_strip_names[i], O_RDWR | O_CREAT, FILE_RIGHT);
         if(fd_strip < 0){
@@ -242,9 +273,15 @@ void writeOriginStrip(char* file_path, int p){
         }
 
         lseek(fd_strip, 0, SEEK_SET);
-        if(sendfile(fd_strip, fd_source, NULL, strip_size) == -1){
-            printf("sendfile error, %d, %s, errno %d\n", i, strerror(errno), errno);
-            exit(-1);
+
+        long rest_size = strip_size;
+        while(rest_size > 0){
+            long send_size = rest_size < GB_SIZE ? rest_size : GB_SIZE;
+            if(sendfile(fd_strip, fd_source, NULL, send_size) == -1){
+                printf("sendfile error, %d, %s, errno %d\n", i, strerror(errno), errno);
+                exit(-1);
+            }
+            rest_size -= send_size;
         }
         close(fd_strip);
     }
@@ -276,34 +313,36 @@ void writeRedundancyFileHorizontal(char* file_path, int p){
         exit(-1);
     }
 
-    while(1){
-        int end = 0;
-        int max_n = 0;
-        for(int i=0; i<=p-1; i++){
-            int n = read(fds[i], read_buf, HANG_JIAO_YAN_WRITE_BUF_SIZE);
-            max_n = n>max_n?n:max_n;
-            if(i==0 && n==0){
-                end = 1;
-                break;
-            }
-            XOR(write_buf, read_buf, n);
-        }
-        if(end==1)
-            break;
-        write(hangFd, write_buf, max_n);
-    }
-
-    long hang_strip_size = getFileSize(horizontal_strip_name);
-    long strip_size = stripSize(file_path, p);
-    if(hang_strip_size != strip_size){
-        printf("hang strip generate error, size not valid\n"); 
-        exit(-1);
-    }
-
+    // while(1){
+    //     int end = 0;
+    //     int max_n = 0;
+    //     memset(write_buf, 0, HANG_JIAO_YAN_WRITE_BUF_SIZE);//清除上次的残留
+    //     for(int i=0; i<=p-1; i++){
+    //         int n = read(fds[i], read_buf, HANG_JIAO_YAN_WRITE_BUF_SIZE);
+    //         max_n = n>max_n?n:max_n;
+    //         if(i==0 && n==0){
+    //             end = 1;
+    //             break;
+    //         }
+    //         XOR(write_buf, read_buf, n);
+    //     }
+    //     if(end==1)
+    //         break;
+    //     write(hangFd, write_buf, max_n);
+    // }
+    const long strip_size = getFileSize(origin_strip_names[0]);
+    const long cell_size = strip_size / (p-1);
+    for(int i=0; i<=p-2; i++)
+        //XORcell会改变文件的打开指针，不用seek，一个cell接着一个顺着往下XOR就行
+        XORcell(hangFd, fds, p, cell_size);
+    
+    // 关闭文件、释放内存
     for(int i=0; i<=p-1; i++)
         close(fds[i]);
     close(hangFd);
-    free(fds);free(write_buf);free(read_buf);
+    free(fds);
+    free(write_buf);
+    free(read_buf);
 }
 
 void writeSyndromeCellFile(char* file_path, int p){
@@ -443,6 +482,7 @@ void writeRedundancyFileDiagonal(char* file_path, int p){
 void evenoddWrite(char* file_path, int p){
     dataDiskFolderCheckAndMake(p);
     stripNameInit(p, getMetaNums());
+    saveFileMeta(metaFilePath, file_path, p);
     writeOriginStrip(file_path, p);
     writeRedundancyFileHorizontal(file_path, p);
     writeRedundancyFileDiagonal(file_path, p);
@@ -499,29 +539,33 @@ void lostScan(const char* file_name){
 }
 
 void mergeDataStrip(const char** data_strip_names, int m, const char* save_as, int padding_zero){
-    int fd_save = open(save_as, O_WRONLY | O_CREAT | O_APPEND, FILE_RIGHT);
+    int fd_save = open(save_as, O_WRONLY | O_CREAT, FILE_RIGHT);
     if(fd_save < 0){
         printf("open %s error, %s\n", save_as, strerror(errno)); 
         exit(-1);
     }
-
     long strip_size = getFileSize(data_strip_names[0]);
     if(ftruncate(fd_save, strip_size*m) < 0){
         printf("mergeDataStrip ftruncate1 error, %s\n", strerror(errno));
         exit(-1);
     }
-
     lseek(fd_save, 0, SEEK_SET);
 
     for(int i=0; i<=m-1; i++){
-        int fd_strip = open(data_strip_names[i], O_RDWR | O_CREAT, FILE_RIGHT);
+        int fd_strip = open(data_strip_names[i], O_RDONLY, FILE_RIGHT);
         if(fd_strip < 0){
             printf("mergeDataStrip open %d error, %s\n", i, strerror(errno));
             exit(-1);
         }
-        if(sendfile(fd_save, fd_strip, NULL, strip_size) == -1){
-            printf("mergeDataStrip sendfile %d error, %s\n", i, strerror(errno));
-            exit(-1);
+
+        long rest_size = strip_size;
+        while(rest_size > 0){
+            long send_size = rest_size < GB_SIZE ? rest_size : GB_SIZE;
+            if(sendfile(fd_save, fd_strip, NULL, send_size) == -1){
+                printf("mergeDataStrip sendfile %d error, %s\n", i, strerror(errno));
+                exit(-1);
+            }
+            rest_size -= send_size;
         }
     }
 
@@ -554,32 +598,25 @@ void restoreOneLostDataStrip(const char* strip_name, int m, int lost_index){
 
     unsigned char* write_buf = (unsigned char*)calloc(1, GB_SIZE);
     unsigned char* read_buf = (unsigned char*)calloc(1, GB_SIZE);
-    long sum_write = 0;
-    while(1){
-        int n_read = 0;
+
+    long rest_size = getFileSize(horizontal_strip_name);
+    while(rest_size > 0){
+        memset(write_buf, 0, GB_SIZE);//清除上次的残留
+        int read_size = GB_SIZE < rest_size ? GB_SIZE : rest_size;
         for(int i=0; i<=m; i++){
             if(i != lost_index){
-                n_read = read(fds[i], read_buf, GB_SIZE);
-                XOR(write_buf, read_buf, n_read);
+                read(fds[i], read_buf, read_size);
+                XOR(write_buf, read_buf, read_size);
             }
         }
-        if(n_read = 0)
-            break;
-        int n_write = write(fd_restore_strip, write_buf, n_read);
-        sum_write += n_write;
+
+        write(fd_restore_strip, write_buf, read_size);
+        rest_size -= read_size;
     } 
 
     for(int i=0; i<=m; i++)
         if(i != lost_index)
             close(fds[i]);
-
-    //长度验证
-    long horizontal_size = getFileSize(horizontal_strip_name);
-    if(sum_write != horizontal_size){
-        printf("恢复一个丢失的数据列，长度不正确. sum write:%d, horizon size:%d\n", 
-                sum_write, horizontal_size); 
-        exit(-1);
-    }
 }
 
 void removeRestoredOneLostDataStrip(const char* strip_name){
@@ -1032,28 +1069,20 @@ void XORcell(int dest_fd, int* src_fds, int src_num, long cell_size){
         从文件当前打开的指针开始操作
         XOR一个cell的大小
         往目标fd写一个cell的大小
+        -- 该函数会改变文件打开的指针，不置回原位 --
     */
     unsigned char* write_buf = (unsigned char*)calloc(1, GB_SIZE);
     unsigned char* read_buf = (unsigned char*)calloc(1, GB_SIZE);
     int rest_size = cell_size;
-    while(1){
+    while(rest_size > 0){
         int read_size = GB_SIZE < rest_size ? GB_SIZE : rest_size;
-        int n_read = 0;
+        memset(write_buf, 0, GB_SIZE);//清除上次的残留
 
-        // XOR
         for(int l=0; l<=src_num-1; l++){
-            n_read = read(src_fds[l], read_buf, read_size);
-            if(n_read != read_size)
-                   ErrorMsgExit("XORcell readsize error1");
+            read(src_fds[l], read_buf, read_size);
             XOR(write_buf, read_buf, read_size);
         }
-
-        // 写
-        int n_write = write(dest_fd, write_buf, read_size);
-        if(n_write != read_size){
-            printf("XORcell n_write != read_size [error]\n");
-            exit(-1);
-        }
+        write(dest_fd, write_buf, read_size);
         rest_size -= read_size;
     }
 
@@ -1130,16 +1159,24 @@ void recursive123(int m, int lost_i, int lost_j,
     free(ds_fds);
 }
 
-void formula_8_tmp_S0_name_init(int m, const char** ss){
-
+void formula_8_tmp_S0_name_init(int m, char** ss){
+    ss = (char**)malloc(sizeof(char*) * m);
+    for(int i=0; i<=m-1; i++){
+        ss[i] = (char*)malloc(128);
+        sprintf(ss[i], "formula_8_tmp_S0_%d", i);
+    }
 }
 
-void formula_9_tmp_S1_name_init(int m, const char** ss){
-
+void formula_9_tmp_S1_name_init(int m, char** ss){
+    ss = (char**)malloc(sizeof(char*) * m);
+    for(int i=0; i<=m-1; i++){
+        ss[i] = (char*)malloc(128);
+        sprintf(ss[i], "formula_9_tmp_S1_%d", i);
+    }
 }
 
 void readLostTwoData_Situation(int m, const char* save_as, int padding_zero){
-    formula_7(m);
+    formula_7(m);   
 
     formula_8_tmp_S0_name_init(m, formula_8_tmp_S0s);
     formula_8(m ,lost_index_i, lost_index_j, 
@@ -1223,12 +1260,15 @@ void evenoddRead(const char* file_name, const char* save_as){
             printf("奇怪的错误 i=%d, j=%d\n", lost_index_i, lost_index_j);
             exit(-1);  
         }
+    }else if(lost_num == 0){
+        printf("未丢失数据列.\n");
+        mergeDataStrip(origin_strip_names, m, save_as, padding_zero);
     }else{
         printf("impossible...\n");
         exit(-1); 
     }
-    //file name是存的时候的名字
-    //save as是读的时候另存为的名字，这里另存为的地方应该是和evenodd同目录的地方
+    // file name是存的时候的名字
+    // save as是读的时候另存为的名字，这里另存为的地方应该是和evenodd同目录的地方
 }
 
 int main(int argc, char** argv){
