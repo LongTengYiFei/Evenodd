@@ -313,23 +313,6 @@ void writeRedundancyFileHorizontal(char* file_path, int p){
         exit(-1);
     }
 
-    // while(1){
-    //     int end = 0;
-    //     int max_n = 0;
-    //     memset(write_buf, 0, HANG_JIAO_YAN_WRITE_BUF_SIZE);//清除上次的残留
-    //     for(int i=0; i<=p-1; i++){
-    //         int n = read(fds[i], read_buf, HANG_JIAO_YAN_WRITE_BUF_SIZE);
-    //         max_n = n>max_n?n:max_n;
-    //         if(i==0 && n==0){
-    //             end = 1;
-    //             break;
-    //         }
-    //         XOR(write_buf, read_buf, n);
-    //     }
-    //     if(end==1)
-    //         break;
-    //     write(hangFd, write_buf, max_n);
-    // }
     const long strip_size = getFileSize(origin_strip_names[0]);
     const long cell_size = strip_size / (p-1);
     for(int i=0; i<=p-2; i++)
@@ -364,6 +347,7 @@ void writeSyndromeCellFile(char* file_path, int p){
     while(1){
         int end = 0;
         int n = 0;
+        memset(write_buf, 0, GB_SIZE);
         for(int i=1; i<=p-1; i++){
             n = read(fds[i], read_buf, rest_size<GB_SIZE?rest_size:GB_SIZE);
             if(n == 0){
@@ -448,6 +432,7 @@ void writeRedundancyFileDiagonal(char* file_path, int p){
         while(1){
             int end = 0;
             int n = 0;
+            memset(write_buf, 0, GB_SIZE);
             //read strip
             for(int i=1; i<=p-1; i++){
                 n = read(fds[i], read_buf, rest_size<GB_SIZE?rest_size:GB_SIZE);
@@ -687,6 +672,8 @@ void formula_5(int m, int lost_index){
         
         int read_size = GB_SIZE < rest_size ? GB_SIZE : rest_size;
         int n_read = 0;
+        memset(write_buf, 0, GB_SIZE);
+
         for(int i=0; i<=m+1; i++){
             if(i == lost_index || i == m)
                 continue;
@@ -765,6 +752,7 @@ void formula_6(int m, int lost_index){
         //开始读每个格子，然后异或，然后写，S文件自己就是一个格子
         int rest_size = cell_size;
         while(1){
+            memset(write_buf, 0, GB_SIZE);
             if(rest_size <= 0)
                 break;
             int read_size = GB_SIZE < rest_size ? GB_SIZE : rest_size;
@@ -844,10 +832,11 @@ void formula_7(int m){
 
     for(int l=0; l<=m-2; l++){
         int rest_size = cell_size;
+        
         while(1){
             int read_size = GB_SIZE < rest_size ? GB_SIZE : rest_size;
             int n_read = 0;
-
+            memset(write_buf, 0, GB_SIZE);
             // 行校验列异或
             n_read = read(fd_horizontal, read_buf, read_size);
             if(n_read != read_size)
@@ -921,10 +910,11 @@ void formula_8(int m, int lost_i, int lost_j,
         }
 
         int rest_size = cell_size;
+        
         while(1){
             int read_size = GB_SIZE < rest_size ? GB_SIZE : rest_size;
             int n_read = 0;
-
+            memset(write_buf, 0, GB_SIZE);
             for(int l=0; l<=m; l++){
                 if(l!=lost_i && l!=lost_j){
                     n_read = read(fds[l], read_buf, read_size);
@@ -1011,9 +1001,12 @@ void formula_9(int m, int lost_i, int lost_j,
         
         // 扫描一个格子的数据(cell_size)
         int rest_size = cell_size;
+        
         while(1){
             int read_size = GB_SIZE < rest_size ? GB_SIZE : rest_size;
             int n_read = 0;
+            memset(write_buf, 0, GB_SIZE);
+
             // S文件异或
             n_read = read(fd_s_7, read_buf, read_size);
             if(n_read != read_size)
