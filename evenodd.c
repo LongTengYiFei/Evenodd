@@ -774,8 +774,12 @@ void formula_6(int m, int lost_index){
 void readLostDataAndHorizon_Situation(int m, const char* save_as, int padding_zero){
     formula_5(m, lost_index_i);
     formula_6(m, lost_index_i);
-    removeTmpFile(formula_5_tmp_S_cell_file_path);
     mergeDataStrip(origin_strip_names, m, save_as, padding_zero);
+    
+    //题目没要求恢复数据列，这里删掉
+    // 公式5产生的S也是额外的，也删掉
+    removeTmpFile(origin_strip_names[lost_index_i]);
+    removeTmpFile(formula_5_tmp_S_cell_file_path);
 }
 
 void formula_7(int m){
