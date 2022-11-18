@@ -643,11 +643,11 @@ void formula_5(int m, int lost_index){
     const long cell_size = strip_size / (m-1);
     for(int l=0; l<=m+1; l++){
         if(l<m && l!=lost_index){
-            lseek(fds[l], cell_size*notation(lost_index-l-1, m), SEEK_SET);
+            lseek(fds[l], cell_size * notation(lost_index-l-1, m), SEEK_SET);
         }else if(l==m){
             ;
         }else if(l==m+1){
-            lseek(fds[l], cell_size*notation(lost_index-1, m), SEEK_SET);
+            lseek(fds[l], cell_size * notation(lost_index-1, m), SEEK_SET);
         }
     }
 
@@ -727,10 +727,10 @@ void formula_6(int m, int lost_index){
     for(int k=0; k<=m-2; k++){
         // 设置读取位置的起点，也就是哪个格子
         lseek(fd_sfile, 0, SEEK_SET);
-        lseek(fds[m+1], notation(lost_index - 1, m) * cell_size, SEEK_SET);
+        lseek(fds[m+1], notation(k + lost_index, m) * cell_size, SEEK_SET);
         for(int l=0; l<=m-1; l++)
             if(l != lost_index)
-                lseek(fds[l], notation(k + lost_index - l, m), SEEK_SET);
+                lseek(fds[l], notation(k + lost_index - l, m) * cell_size, SEEK_SET);
             
         //开始读每个格子，然后异或，然后写，S文件自己就是一个格子
         int rest_size = cell_size;
@@ -742,15 +742,12 @@ void formula_6(int m, int lost_index){
             XOR(write_buf, read_buf, read_size);
 
             for(int l=0; l<=m+1; l++){
-                if(l==(m+1) && notation(lost_index - 1, m)==(m-1))
+                if(l == lost_index || l == m)
                     continue;
-                if(l<=(m-1) && notation(k+lost_index-l, m)==(m-1))
+                if(l==(m+1) && notation(k + lost_index, m)==(m-1))
                     continue;
-                if(l == lost_index)
+                if(l<=(m-1) && notation(k + lost_index - l, m)==(m-1))
                     continue;
-                if(l == m)
-                    continue;
-
                 // 对角线校验列和未丢失的数据列
                 read(fds[l], read_buf, read_size);
                 XOR(write_buf, read_buf, read_size); 
@@ -961,8 +958,8 @@ void formula_9(int m, int lost_i, int lost_j,
         // S文件推到起点
         lseek(fd_s_7, 0, SEEK_SET);
         // 对角线校验列推到第u个格子
-        if(u != m-1)
-            lseek(fd_diagonal, u*cell_size, SEEK_SET);
+        lseek(fd_diagonal, u*cell_size, SEEK_SET);
+        
         // 推未丢失的数据列
         for(int l=0; l<=m-1; l++){
             if(l!=lost_i && l!=lost_j){
