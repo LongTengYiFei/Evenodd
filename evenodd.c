@@ -802,36 +802,30 @@ void formula_7(int m){
     const long strip_size = getFileSize(diagonal_strip_name);
     const long cell_size = strip_size / (m-1);
 
-    for(int l=0; l<=m-2; l++){
-        int rest_size = cell_size;
-        
-        while(1){
-            int read_size = GB_SIZE < rest_size ? GB_SIZE : rest_size;
-            int n_read = 0;
-            memset(write_buf, 0, GB_SIZE);
-            // 行校验列异或
-            n_read = read(fd_horizontal, read_buf, read_size);
-            if(n_read != read_size)
-                ErrorMsgExit("formula7 readsize error1");
-            XOR(write_buf, read_buf, read_size);
+    int rest_size = cell_size;
+    while(rest_size > 0){
+        int read_size = GB_SIZE < rest_size ? GB_SIZE : rest_size;
+        memset(write_buf, 0, GB_SIZE);
 
-            // 对角线校验列异或
-            n_read = read(fd_diagonal, read_buf, read_size);
-            if(n_read != read_size)
-                ErrorMsgExit("formula7 readsize error2");
+        // 行校验列异或
+        for(int l=0; l<=m-2; l++){
+            lseek(fd_horizontal, l*cell_size, SEEK_SET);
+            read(fd_horizontal, read_buf, read_size);
             XOR(write_buf, read_buf, read_size);
-
-            //写
-            int n_write = write(fd_tmp_s, write_buf, read_size);
-            if(n_write != read_size){
-                printf("formula 7 n_write != read_size [error]\n");
-                exit(-1);
-            }
-            
-            rest_size -= read_size;
         }
-    }
+        
+        // 对角线校验列异或
+        for(int l=0; l<=m-2; l++){
+            lseek(fd_diagonal, l*cell_size, SEEK_SET);
+            read(fd_diagonal, read_buf, read_size);
+            XOR(write_buf, read_buf, read_size);
+        }
+        //写
+        write(fd_tmp_s, write_buf, read_size);
 
+        rest_size -= read_size;
+    }
+    
     // 3.关闭文件
     close(fd_diagonal);
     close(fd_horizontal);
@@ -846,7 +840,7 @@ void formula_8(int m, int lost_i, int lost_j,
     // 1.准备文件
     // 未丢失的数据列和行校验列
     // 这里有两个fd是空的，因为丢了
-    int* fds = (int*)calloc(m, sizeof(int));
+    int* fds = (int*)calloc(m+1, sizeof(int));
     for(int i=0; i<=m; i++){
         if(i<m && i!=lost_i && i!=lost_j){
             fds[i] = open(data_names[i], O_RDONLY);
@@ -883,26 +877,18 @@ void formula_8(int m, int lost_i, int lost_j,
 
         int rest_size = cell_size;
         
-        while(1){
+        while(rest_size > 0){
             int read_size = GB_SIZE < rest_size ? GB_SIZE : rest_size;
-            int n_read = 0;
             memset(write_buf, 0, GB_SIZE);
             for(int l=0; l<=m; l++){
                 if(l!=lost_i && l!=lost_j){
-                    n_read = read(fds[l], read_buf, read_size);
-                    if(n_read != read_size)
-                        ErrorMsgExit("formula8 readsize error1");
+                    read(fds[l], read_buf, read_size);
                     XOR(write_buf, read_buf, read_size);
                 }
             }
             
             //写
-            int n_write = write(hs_fds[u], write_buf, read_size);
-            if(n_write != read_size){
-                printf("formula 8 n_write != read_size [error]\n");
-                exit(-1);
-            }
-            
+            write(hs_fds[u], write_buf, read_size);
             rest_size -= read_size;
         }
     }
@@ -959,7 +945,7 @@ void formula_9(int m, int lost_i, int lost_j,
         lseek(fd_s_7, 0, SEEK_SET);
         // 对角线校验列推到第u个格子
         lseek(fd_diagonal, u*cell_size, SEEK_SET);
-        
+
         // 推未丢失的数据列
         for(int l=0; l<=m-1; l++){
             if(l!=lost_i && l!=lost_j){
@@ -974,22 +960,17 @@ void formula_9(int m, int lost_i, int lost_j,
         // 扫描一个格子的数据(cell_size)
         int rest_size = cell_size;
         
-        while(1){
+        while(rest_size > 0){
             int read_size = GB_SIZE < rest_size ? GB_SIZE : rest_size;
-            int n_read = 0;
             memset(write_buf, 0, GB_SIZE);
 
             // S文件异或
-            n_read = read(fd_s_7, read_buf, read_size);
-            if(n_read != read_size)
-                ErrorMsgExit("formula9 readsize error1");
+            read(fd_s_7, read_buf, read_size);
             XOR(write_buf, read_buf, read_size);
 
             if(u!=m-1){
                 // 对角线校验列异或
-                n_read = read(fd_diagonal, read_buf, read_size);
-                if(n_read != read_size)
-                    ErrorMsgExit("formula9 readsize error2");
+                read(fd_diagonal, read_buf, read_size);
                 XOR(write_buf, read_buf, read_size);
             }
             
@@ -997,20 +978,14 @@ void formula_9(int m, int lost_i, int lost_j,
             for(int l=0; l<=m-1; l++){
                 if(l!=lost_i && l!=lost_j){
                     if(notation(u-l, m) != m-1){
-                        n_read = read(fds[l], read_buf, read_size);
-                        if(n_read != read_size)
-                            ErrorMsgExit("formula9 readsize error3");
+                        read(fds[l], read_buf, read_size);
                         XOR(write_buf, read_buf, read_size);
                     }
                 }
             }
 
             //写
-            int n_write = write(ds_fds[u], write_buf, read_size);
-            if(n_write != read_size){
-                printf("formula 9 n_write != read_size [error]\n");
-                exit(-1);
-            }
+            write(ds_fds[u], write_buf, read_size);
             
             rest_size -= read_size;
         }
@@ -1082,7 +1057,7 @@ void recursive123(int m, int lost_i, int lost_j,
     int* hs_fds = (int*)calloc(m, sizeof(int));
     int* ds_fds = (int*)calloc(m, sizeof(int));
     for(int u=0; u<=m-1; u++){
-        hs_fds[u] = open(horizontal_strip_name[u], O_RDONLY);
+        hs_fds[u] = open(horizontal_syndrome_names[u], O_RDONLY);
         if(hs_fds[u] < 0)
             ErrorMsgExit("recursive123 horizontal error");
         ds_fds[u] = open(diagonal_syndrome_names[u], O_RDONLY);
@@ -1094,9 +1069,9 @@ void recursive123(int m, int lost_i, int lost_j,
     int s = notation(lost_i - lost_j - 1, m);
     int fds[2] = {0};
     while(s != m-1){
-        // 计算J列
+        // 计算J列  
         lseek(fd_j, s*cell_size, SEEK_SET);
-        lseek(fd_i, notation(s + lost_i - lost_j, m)*cell_size, SEEK_SET);
+        lseek(fd_i, notation(s + lost_j - lost_i, m)*cell_size, SEEK_SET);
         int S1 = ds_fds[notation(lost_j + s, m)];
         fds[0] = S1;
         fds[1] = fd_i;
@@ -1124,32 +1099,32 @@ void recursive123(int m, int lost_i, int lost_j,
     free(ds_fds);
 }
 
-void formula_8_tmp_S0_name_init(int m, char** ss){
-    ss = (char**)malloc(sizeof(char*) * m);
+void formula_8_tmp_S0_name_init(int m){
+    formula_8_tmp_S0s = (char**)malloc(sizeof(char*) * m);
     for(int i=0; i<=m-1; i++){
-        ss[i] = (char*)malloc(128);
-        sprintf(ss[i], "formula_8_tmp_S0_%d", i);
+        formula_8_tmp_S0s[i] = (char*)malloc(128);
+        sprintf(formula_8_tmp_S0s[i], "formula_8_tmp_S0_%d", i);
     }
 }
 
-void formula_9_tmp_S1_name_init(int m, char** ss){
-    ss = (char**)malloc(sizeof(char*) * m);
+void formula_9_tmp_S1_name_init(int m){
+    formula_9_tmp_S1s = (char**)malloc(sizeof(char*) * m);
     for(int i=0; i<=m-1; i++){
-        ss[i] = (char*)malloc(128);
-        sprintf(ss[i], "formula_9_tmp_S1_%d", i);
+        formula_9_tmp_S1s[i] = (char*)malloc(128);
+        sprintf(formula_9_tmp_S1s[i], "formula_9_tmp_S1_%d", i);
     }
 }
 
 void readLostTwoData_Situation(int m, const char* save_as, int padding_zero){
     formula_7(m);   
 
-    formula_8_tmp_S0_name_init(m, formula_8_tmp_S0s);
+    formula_8_tmp_S0_name_init(m);
     formula_8(m ,lost_index_i, lost_index_j, 
                                 origin_strip_names,
                                 horizontal_strip_name,
                                 formula_8_tmp_S0s);
 
-    formula_9_tmp_S1_name_init(m, formula_9_tmp_S1s);
+    formula_9_tmp_S1_name_init(m);
     formula_9(m, lost_index_i, lost_index_j,
                                 formula_9_tmp_S1s,
                                 formula_7_tmp_S_cell_file_path,
@@ -1161,12 +1136,17 @@ void readLostTwoData_Situation(int m, const char* save_as, int padding_zero){
                                     origin_strip_names[lost_index_j],
                                     formula_8_tmp_S0s,
                                     formula_9_tmp_S1s);
+
+    mergeDataStrip(origin_strip_names, m, save_as, padding_zero);
+
     //删除临时文件
     removeTmpFile(formula_7_tmp_S_cell_file_path);
     for(int i=0; i<=m-1; i++){
         removeTmpFile(formula_8_tmp_S0s[i]);
         removeTmpFile(formula_9_tmp_S1s[i]);
     }
+    removeTmpFile(origin_strip_names[lost_index_i]);
+    removeTmpFile(origin_strip_names[lost_index_j]);
 }
 
 void evenoddRead(const char* file_name, const char* save_as){
