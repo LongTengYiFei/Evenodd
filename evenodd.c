@@ -10,6 +10,7 @@
 #include <sys/sendfile.h>
 #include <math.h>
 #include <stdbool.h>
+#include <time.h>
 
 //#define RELEASE
 #define FILE_RIGHT (S_IRUSR | S_IWUSR | S_IXUSR |  S_IRGRP |  S_IWGRP |  S_IROTH | S_IWOTH)
@@ -733,7 +734,7 @@ void formula_6(int m, int lost_index){
                 lseek(fds[l], notation(k + lost_index - l, m) * cell_size, SEEK_SET);
             
         //开始读每个格子，然后异或，然后写，S文件自己就是一个格子
-        int rest_size = cell_size;
+        long rest_size = cell_size;
         while(rest_size > 0){
             memset(write_buf, 0, GB_SIZE);
             int read_size = GB_SIZE < rest_size ? GB_SIZE : rest_size;
@@ -802,28 +803,31 @@ void formula_7(int m){
     const long strip_size = getFileSize(diagonal_strip_name);
     const long cell_size = strip_size / (m-1);
 
-    int rest_size = cell_size;
+    long rest_size = cell_size;
+    long accumulate_size = 0;
     while(rest_size > 0){
         int read_size = GB_SIZE < rest_size ? GB_SIZE : rest_size;
         memset(write_buf, 0, GB_SIZE);
 
         // 行校验列异或
         for(int l=0; l<=m-2; l++){
-            lseek(fd_horizontal, l*cell_size, SEEK_SET);
+            lseek(fd_horizontal, l*cell_size + accumulate_size, SEEK_SET);
             read(fd_horizontal, read_buf, read_size);
             XOR(write_buf, read_buf, read_size);
         }
         
         // 对角线校验列异或
         for(int l=0; l<=m-2; l++){
-            lseek(fd_diagonal, l*cell_size, SEEK_SET);
+            lseek(fd_diagonal, l*cell_size + accumulate_size, SEEK_SET);
             read(fd_diagonal, read_buf, read_size);
             XOR(write_buf, read_buf, read_size);
         }
+
         //写
         write(fd_tmp_s, write_buf, read_size);
 
         rest_size -= read_size;
+        accumulate_size += read_size;
     }
     
     // 3.关闭文件
@@ -875,8 +879,7 @@ void formula_8(int m, int lost_i, int lost_j,
             break;
         }
 
-        int rest_size = cell_size;
-        
+        long rest_size = cell_size;
         while(rest_size > 0){
             int read_size = GB_SIZE < rest_size ? GB_SIZE : rest_size;
             memset(write_buf, 0, GB_SIZE);
@@ -944,7 +947,8 @@ void formula_9(int m, int lost_i, int lost_j,
         // S文件推到起点
         lseek(fd_s_7, 0, SEEK_SET);
         // 对角线校验列推到第u个格子
-        lseek(fd_diagonal, u*cell_size, SEEK_SET);
+        if(u != m-1)
+            lseek(fd_diagonal, u*cell_size, SEEK_SET);
 
         // 推未丢失的数据列
         for(int l=0; l<=m-1; l++){
@@ -958,8 +962,7 @@ void formula_9(int m, int lost_i, int lost_j,
         }
         
         // 扫描一个格子的数据(cell_size)
-        int rest_size = cell_size;
-        
+        long rest_size = cell_size;
         while(rest_size > 0){
             int read_size = GB_SIZE < rest_size ? GB_SIZE : rest_size;
             memset(write_buf, 0, GB_SIZE);
@@ -1013,7 +1016,7 @@ void XORcell(int dest_fd, int* src_fds, int src_num, long cell_size){
     */
     unsigned char* write_buf = (unsigned char*)calloc(1, GB_SIZE);
     unsigned char* read_buf = (unsigned char*)calloc(1, GB_SIZE);
-    int rest_size = cell_size;
+    long rest_size = cell_size;
     while(rest_size > 0){
         int read_size = GB_SIZE < rest_size ? GB_SIZE : rest_size;
         memset(write_buf, 0, GB_SIZE);//清除上次的残留
@@ -1061,7 +1064,7 @@ void recursive123(int m, int lost_i, int lost_j,
         if(hs_fds[u] < 0)
             ErrorMsgExit("recursive123 horizontal error");
         ds_fds[u] = open(diagonal_syndrome_names[u], O_RDONLY);
-        if(hs_fds[u] < 0)
+        if(ds_fds[u] < 0)
             ErrorMsgExit("recursive123 diagonal error");
     }
 
@@ -1071,16 +1074,24 @@ void recursive123(int m, int lost_i, int lost_j,
     while(s != m-1){
         // 计算J列  
         lseek(fd_j, s*cell_size, SEEK_SET);
-        lseek(fd_i, notation(s + lost_j - lost_i, m)*cell_size, SEEK_SET);
         int S1 = ds_fds[notation(lost_j + s, m)];
-        fds[0] = S1;
-        fds[1] = fd_i;
-        XORcell(fd_j, fds, 2, cell_size);
+        lseek(S1, 0, SEEK_SET);
 
+        if(notation(s + lost_j - lost_i, m) == m-1){
+            fds[0] = S1;
+            XORcell(fd_j, fds, 1, cell_size);
+        }else{
+            fds[0] = S1;
+            fds[1] = fd_i;
+            lseek(fd_i, notation(s + lost_j - lost_i, m)*cell_size, SEEK_SET);
+            XORcell(fd_j, fds, 2, cell_size);
+        }
+        
         // 计算I列
         lseek(fd_i, s*cell_size, SEEK_SET);
         lseek(fd_j, s*cell_size, SEEK_SET);
         int S0 = hs_fds[s];
+        lseek(S0, 0, SEEK_SET);
         fds[0] = S0;
         fds[1] = fd_j;
         XORcell(fd_i, fds, 2, cell_size);
@@ -1150,6 +1161,9 @@ void readLostTwoData_Situation(int m, const char* save_as, int padding_zero){
 }
 
 void evenoddRead(const char* file_name, const char* save_as){
+    time_t seconds_start;
+    seconds_start = time(NULL);
+
     if(!existFile(file_name)){
         printf("File does not exist!\n");
         exit(-1);
@@ -1198,7 +1212,7 @@ void evenoddRead(const char* file_name, const char* save_as){
             readLostDataStrip_Situation(m, save_as, padding_zero);
         }
         else if(lost_index_i < m && lost_index_j < m){
-            printf("丢失两个数据列.\n");
+            printf("丢失两个数据列 %d, %d.\n", lost_index_i, lost_index_j);
             readLostTwoData_Situation(m, save_as, padding_zero);
         }
         else{
@@ -1214,6 +1228,9 @@ void evenoddRead(const char* file_name, const char* save_as){
     }
     // file name是存的时候的名字
     // save as是读的时候另存为的名字，这里另存为的地方应该是和evenodd同目录的地方
+    time_t seconds_end;
+    seconds_end = time(NULL);
+    printf("本次读操作消耗 = %ld秒\n", seconds_end - seconds_start);
 }
 
 int main(int argc, char** argv){
