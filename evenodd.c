@@ -21,17 +21,27 @@ char* folderPrefix = "./disk_";
 char* metaFilePath = "./meta.txt"; // <file_origin_path, P, paddingZeroNum>
 char* tmp_syndrome_file_path = "./syndrome"; // used for write
 
-// used for a file read
+// used for a file read(some of them are alse used for write and repair)
 char** origin_strip_names = NULL;
 char* horizontal_strip_name = NULL;
 char* diagonal_strip_name = NULL;
+
 char* formula_5_tmp_S_cell_file_path = "./S_cell_5";
 char* formula_7_tmp_S_cell_file_path = "./S_cell_7";
 char** formula_8_tmp_S0s = NULL;
 char** formula_9_tmp_S1s = NULL;
+
 int lost_index_i = -1;
 int lost_index_j = -1;
 int lost_num = 0;
+
+//used for repair
+int number_erasures = 0;
+int lost_disk_i = -1;
+int lost_disk_2 = -1;
+
+//
+void repairTwoLostStrip(int, int);
 
 void ErrorMsgExit(const char* s){
     printf(s);
@@ -86,31 +96,25 @@ int getMeta(char* file_name, char* meta_buf){
     return -1;
 }
 
-int getPrimeFromMetaTxt(char* file_name){
-    char read_buf[1024]={0}; 
-    if(getMeta(file_name, read_buf) == -1){
-        return -1;
-    }
+int getMfromMeta(const char* meta_buf){
+    int pos = 0;
+    while(meta_buf[pos] != ' ')
+        pos++;
 
     int ans = 0;
-    for(int i=strlen(file_name)+1; read_buf[i]!=' '; i++){
-        ans += (read_buf[i]-'0');
+    for(int i=pos+1; meta_buf[i]!=' '; i++){
+        ans += (meta_buf[i]-'0');
         ans *= 10;    
     }
     ans /= 10;
     return ans;
 }
 
-int getPaddingZeroFromMetaTxt(char* file_name){
-    char read_buf[1024]={0}; 
-    if(getMeta(file_name, read_buf) == -1){
-        return -1;
-    }
-
+long getPadfromMeta(const char* meta_buf){
     int padding_zero_start_pos = 0;
     int space_num = 0;
-    for(int i=0; i<=strlen(read_buf)-1; i++){
-        if(read_buf[i] == ' ')
+    for(int i=0; i<=strlen(meta_buf)-1; i++){
+        if(meta_buf[i] == ' ')
             space_num++;
         if(space_num == 2){
             padding_zero_start_pos = (i+1);
@@ -119,12 +123,30 @@ int getPaddingZeroFromMetaTxt(char* file_name){
     }
 
     int ans = 0;
-    for(int i=padding_zero_start_pos; read_buf[i]!='\n'; i++){
-        ans += (read_buf[i]-'0');
+    for(int i=padding_zero_start_pos; meta_buf[i]!='\n'; i++){
+        ans += (meta_buf[i]-'0');
         ans *= 10;
     }
     ans /= 10;
     return ans;
+}
+
+int getPrimeFromMetaTxt(char* file_name){
+    char read_buf[1024]={0}; 
+    if(getMeta(file_name, read_buf) == -1){
+        return -1;
+    }
+
+    return getMfromMeta(read_buf);
+}
+
+long getPaddingZeroFromMetaTxt(char* file_name){
+    char read_buf[1024]={0}; 
+    if(getMeta(file_name, read_buf) == -1){
+        return -1;
+    }
+
+    return getPadfromMeta(read_buf);
 }
 
 int cellSumNum(int p){
@@ -293,7 +315,7 @@ void XOR(unsigned char* buf1, unsigned char*buf2, long len){
         buf1[i] = buf1[i]^buf2[i]; 
 }
 
-void writeRedundancyFileHorizontal(char* file_path, int p){
+void writeRedundancyFileHorizontal(int p){
     unsigned char* write_buf=(unsigned char*)malloc(HANG_JIAO_YAN_WRITE_BUF_SIZE);
     memset(write_buf, 0, HANG_JIAO_YAN_WRITE_BUF_SIZE);
     unsigned char* read_buf=(unsigned char*)malloc(HANG_JIAO_YAN_WRITE_BUF_SIZE);
@@ -329,7 +351,7 @@ void writeRedundancyFileHorizontal(char* file_path, int p){
     free(read_buf);
 }
 
-void writeSyndromeCellFile(char* file_path, int p){
+void writeSyndromeCellFile(long cell_size, int p){
     int fd_syn = open(tmp_syndrome_file_path, O_RDWR | O_APPEND | O_CREAT, FILE_RIGHT);
     unsigned char* write_buf = (unsigned char*)malloc(GB_SIZE);
     memset(write_buf, 0, GB_SIZE);
@@ -337,7 +359,6 @@ void writeSyndromeCellFile(char* file_path, int p){
     memset(read_buf, 0, GB_SIZE);
     
     int* fds=(int*)malloc(p*sizeof(int));
-    long cell_size = cellSize(file_path, p);
     long rest_size = cell_size;
     for(int col=1; col<=p-1; col++){
         int row = p-col-1;
@@ -385,7 +406,7 @@ void removeTmpFile(const char* s){
     }
 }
 
-void writeRedundancyFileDiagonal(char* file_path, int m){
+void writeRedundancyFileDiagonal(long cell_size, int m){
     int synFd = open(tmp_syndrome_file_path, O_RDONLY, FILE_RIGHT);
     if(synFd < 0){
         printf("open %s error, %s\n", tmp_syndrome_file_path, strerror(errno)); 
@@ -404,7 +425,6 @@ void writeRedundancyFileDiagonal(char* file_path, int m){
     
     unsigned char* write_buf = (unsigned char*)malloc(GB_SIZE);
     unsigned char* read_buf = (unsigned char*)malloc(GB_SIZE);
-    long cell_size = cellSize(file_path, m);
     for(int l=0; l<=m-2; l++){
         // 数据列推到指定格子
         for(int t=0; t<=m-1; t++){
@@ -456,10 +476,11 @@ void evenoddWrite(char* file_path, int p){
     saveFileMeta(metaFilePath, file_path, p);
     
     writeOriginStrip(file_path, p);
-    writeRedundancyFileHorizontal(file_path, p);
+    writeRedundancyFileHorizontal(p);
 
-    writeSyndromeCellFile(file_path, p);
-    writeRedundancyFileDiagonal(file_path, p);
+    long cell_size = cellSize(file_path, p);
+    writeSyndromeCellFile(cell_size, p);
+    writeRedundancyFileDiagonal(cell_size, p);
     removeTmpFile(tmp_syndrome_file_path);
 }
 
@@ -485,8 +506,12 @@ int existFile(const char* file_name){
 
 void lostScan(const char* file_name){  
     int p = getPrimeFromMetaTxt(file_name);
+    lostScanM(p);
+}
+
+void lostScanM(int m){
     lost_num = 0;
-    for(int i=0; i<=p-1; i++)
+    for(int i=0; i<=m-1; i++)
         //如果访问不到这个列，说明，要么列文件丢了，要么整个disk目录丢了
         if(access(origin_strip_names[i], F_OK)  < 0){
             lost_num ++ ;
@@ -499,17 +524,17 @@ void lostScan(const char* file_name){
     if(access(horizontal_strip_name, F_OK)  < 0){
         lost_num ++ ;
         if(lost_index_i == -1)
-                lost_index_i = p;
+                lost_index_i = m;
             else
-                lost_index_j = p;
+                lost_index_j = m;
     }
         
     if(access(diagonal_strip_name, F_OK)  < 0){
         lost_num ++ ;
         if(lost_index_i == -1)
-                lost_index_i = p+1;
+                lost_index_i = m+1;
             else
-                lost_index_j = p+1;
+                lost_index_j = m+1;
     }
 }
 
@@ -1118,6 +1143,12 @@ void formula_8_tmp_S0_name_init(int m){
     }
 }
 
+void formula_8_tmp_S0_name_free(int m){
+    for(int i=0; i<=m-1; i++)
+        free(formula_8_tmp_S0s[i]);
+    free(formula_8_tmp_S0s);
+}
+
 void formula_9_tmp_S1_name_init(int m){
     formula_9_tmp_S1s = (char**)malloc(sizeof(char*) * m);
     for(int i=0; i<=m-1; i++){
@@ -1126,36 +1157,17 @@ void formula_9_tmp_S1_name_init(int m){
     }
 }
 
+void formula_9_tmp_S1_name_free(int m){
+    for(int i=0; i<=m-1; i++)
+        free(formula_9_tmp_S1s[i]);
+    free(formula_9_tmp_S1s);
+}
+
 void readLostTwoData_Situation(int m, const char* save_as, int padding_zero){
-    formula_7(m);   
-
-    formula_8_tmp_S0_name_init(m);
-    formula_8(m ,lost_index_i, lost_index_j, 
-                                origin_strip_names,
-                                horizontal_strip_name,
-                                formula_8_tmp_S0s);
-
-    formula_9_tmp_S1_name_init(m);
-    formula_9(m, lost_index_i, lost_index_j,
-                                formula_9_tmp_S1s,
-                                formula_7_tmp_S_cell_file_path,
-                                diagonal_strip_name,
-                                origin_strip_names);
-
-    recursive123(m, lost_index_i, lost_index_j,
-                                    origin_strip_names[lost_index_i],
-                                    origin_strip_names[lost_index_j],
-                                    formula_8_tmp_S0s,
-                                    formula_9_tmp_S1s);
+    repairTwoLostStrip(m, padding_zero);
 
     mergeDataStrip(origin_strip_names, m, save_as, padding_zero);
 
-    //删除临时文件
-    removeTmpFile(formula_7_tmp_S_cell_file_path);
-    for(int i=0; i<=m-1; i++){
-        removeTmpFile(formula_8_tmp_S0s[i]);
-        removeTmpFile(formula_9_tmp_S1s[i]);
-    }
     removeTmpFile(origin_strip_names[lost_index_i]);
     removeTmpFile(origin_strip_names[lost_index_j]);
 }
@@ -1233,6 +1245,162 @@ void evenoddRead(const char* file_name, const char* save_as){
     printf("本次读操作消耗 = %ld秒\n", seconds_end - seconds_start);
 }
 
+// ----- ----- ----- REPAIR ----- ----- -----
+void freeStripNames(int m){
+    if(origin_strip_names != NULL){
+        for(int i=0; i<=m-1; i++)
+            free(origin_strip_names[i]);
+    }
+    free(horizontal_strip_name);
+    free(diagonal_strip_name);
+}
+
+void repairTwoLostStrip(int m, int padding_zero){
+    formula_7(m);   
+
+    formula_8_tmp_S0_name_init(m);
+    formula_8(m ,lost_index_i, lost_index_j, 
+                                origin_strip_names,
+                                horizontal_strip_name,
+                                formula_8_tmp_S0s);
+
+    formula_9_tmp_S1_name_init(m);
+    formula_9(m, lost_index_i, lost_index_j,
+                                formula_9_tmp_S1s,
+                                formula_7_tmp_S_cell_file_path,
+                                diagonal_strip_name,
+                                origin_strip_names);
+
+    recursive123(m, lost_index_i, lost_index_j,
+                                    origin_strip_names[lost_index_i],
+                                    origin_strip_names[lost_index_j],
+                                    formula_8_tmp_S0s,
+                                    formula_9_tmp_S1s);
+    //删除临时文件
+    removeTmpFile(formula_7_tmp_S_cell_file_path);
+    for(int i=0; i<=m-1; i++){
+        removeTmpFile(formula_8_tmp_S0s[i]);
+        removeTmpFile(formula_9_tmp_S1s[i]);
+    }
+
+    //释放临时S0 和 S1的名字的空间
+    formula_8_tmp_S0_name_free(m);
+    formula_9_tmp_S1_name_free(m);
+}
+
+void repairFile(int file_id, int m, long padding_zero){
+    // 有可能这个文件没丢失disk
+    printf("file %d, m=%d, padding zero=%ld\n", file_id, m, padding_zero);
+    
+    stripNameInit(m, file_id);
+    lostScanM(m);
+
+    switch (lost_num)
+    {
+        case 0:
+            break;
+
+        case 1:
+            if(lost_index_i <= m-1){
+                restoreOneLostDataStrip(origin_strip_names[lost_index_i], m, lost_index_i);
+            }
+            else if(lost_index_i == m){
+                writeRedundancyFileHorizontal(m);
+            }
+            else if(lost_index_i == m+1){
+                long cell_size = cellSize(horizontal_strip_name, m);
+                writeSyndromeCellFile(cell_size, m);
+                writeRedundancyFileDiagonal(cell_size, m);
+                removeTmpFile(tmp_syndrome_file_path);
+            }
+            break;
+
+        case 2:
+            if(lost_index_i == m && lost_index_j == m+1){
+                printf("丢失两个校验列...\n", file_id);
+                writeRedundancyFileHorizontal(m);
+                long cell_size = cellSize(horizontal_strip_name, m);
+                writeSyndromeCellFile(cell_size, m);
+                writeRedundancyFileDiagonal(cell_size, m);
+                removeTmpFile(tmp_syndrome_file_path);
+            }
+            else if(lost_index_i < m && lost_index_j == m){
+                // 恢复数据列
+                formula_5(m, lost_index_i);
+                formula_6(m, lost_index_i);
+                removeTmpFile(formula_5_tmp_S_cell_file_path);
+                // 恢复行校验列
+                writeRedundancyFileHorizontal(m);
+            }
+            else if(lost_index_i < m && lost_index_j == m+1){
+                // 恢复数据列
+                restoreOneLostDataStrip(origin_strip_names[lost_index_i], m, lost_index_i);
+                // 恢复对角线校验列
+                long cell_size = cellSize(horizontal_strip_name, m);
+                writeSyndromeCellFile(cell_size, m);
+                writeRedundancyFileDiagonal(cell_size, m);
+                removeTmpFile(tmp_syndrome_file_path);
+            }
+            else if(lost_index_i < m && lost_index_j < m){
+                printf("丢失两个数据列...\n", file_id);
+                repairTwoLostStrip(m, padding_zero);
+            }
+            break;
+
+        default:
+            printf("Impossible!\n");
+            break;
+    }
+    freeStripNames(m);
+}
+
+void evenoddRepair(){
+    time_t seconds_start;
+    seconds_start = time(NULL);
+
+    FILE *fp = NULL; 
+    if((fp = fopen(metaFilePath,"r")) == NULL){
+        printf("evenoddRepair fopen error!\n");
+        exit(-1);
+    }
+
+    int m = -1;
+    long pad = -1;
+    int meta_m[1024] = {0};
+    long meta_pad[1024] = {0};
+    int sum = 0;
+    int max_m = 0;
+    char meta_buf[128];
+    while(1)
+    {
+        memset(meta_buf, 0, 128);
+        fgets(meta_buf, 1024, fp);  //读取一行
+        if(strlen(meta_buf) != 0)
+        {
+            m = getMfromMeta(meta_buf);
+            pad = getPadfromMeta(meta_buf);
+            meta_m[sum] = m;
+            meta_pad[sum] = pad;
+            max_m = m>max_m?m:max_m;
+            sum++;
+        }
+        else
+            break;
+    }
+
+    dataDiskFolderCheckAndMake(max_m);
+
+    for(int i=0; i<=sum-1; i++)
+        repairFile(i, meta_m[i], meta_pad[i]);
+    
+    printf("文件共计%d个\n", sum);
+    fclose(fp);
+    
+    time_t seconds_end;
+    seconds_end = time(NULL);
+    printf("本次修复操作消耗 = %ld秒\n", seconds_end - seconds_start);
+}
+
 int main(int argc, char** argv){
     // main
     if(argc < 2){
@@ -1250,8 +1418,21 @@ int main(int argc, char** argv){
         evenoddRead(argv[2], argv[3]);
     }
     else if(strcmp(operation_type, "repair") == 0){
-        //todo
-        ;
+        number_erasures =atoi(argv[2]);
+        if(number_erasures <= 0){
+            printf("修复数量不能小于等于0!\n");
+            exit(-1);
+        }else if(number_erasures >= 3){
+            printf("Too many corruptions!!\n");
+            exit(-1);
+        }else{
+            if(number_erasures == 1)
+                printf("修复丢失的disk%d...\n", atoi(argv[3]));
+            else if(number_erasures == 2)
+                printf("修复丢失的disk%d disk%d...\n", atoi(argv[3]), atoi(argv[4]));
+            //后面的参数好像没啥用
+            evenoddRepair();
+        }
     }
     else{
         printf("Non-supported operations!\n");
