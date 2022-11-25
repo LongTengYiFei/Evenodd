@@ -154,6 +154,7 @@ int cellSumNum(int p){
 }
 
 long cellSize(char* file_name, int p){
+    //这里的filename是用户写的文件名
     double cn = cellSumNum(p);
     double si = getFileSize(file_name);
     return ceil(si / cn);
@@ -1308,7 +1309,7 @@ void repairFile(int file_id, int m, long padding_zero){
                 writeRedundancyFileHorizontal(m);
             }
             else if(lost_index_i == m+1){
-                long cell_size = cellSize(horizontal_strip_name, m);
+                long cell_size = getFileSize(horizontal_strip_name) / (m-1);
                 writeSyndromeCellFile(cell_size, m);
                 writeRedundancyFileDiagonal(cell_size, m);
                 removeTmpFile(tmp_syndrome_file_path);
@@ -1319,7 +1320,7 @@ void repairFile(int file_id, int m, long padding_zero){
             if(lost_index_i == m && lost_index_j == m+1){
                 printf("丢失两个校验列...\n", file_id);
                 writeRedundancyFileHorizontal(m);
-                long cell_size = cellSize(horizontal_strip_name, m);
+                long cell_size = getFileSize(horizontal_strip_name) / (m-1);
                 writeSyndromeCellFile(cell_size, m);
                 writeRedundancyFileDiagonal(cell_size, m);
                 removeTmpFile(tmp_syndrome_file_path);
@@ -1336,7 +1337,7 @@ void repairFile(int file_id, int m, long padding_zero){
                 // 恢复数据列
                 restoreOneLostDataStrip(origin_strip_names[lost_index_i], m, lost_index_i);
                 // 恢复对角线校验列
-                long cell_size = cellSize(horizontal_strip_name, m);
+                long cell_size = getFileSize(horizontal_strip_name) / (m-1);
                 writeSyndromeCellFile(cell_size, m);
                 writeRedundancyFileDiagonal(cell_size, m);
                 removeTmpFile(tmp_syndrome_file_path);
