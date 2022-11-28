@@ -66,8 +66,10 @@ long getFileSize(char* file_path){
     int fd = Open(file_path, O_RDONLY);
     struct stat _stat;
 
+    int ret = fstat(fd, &_stat);
+
     #ifndef RELEASE
-    if(fstat(fd, &_stat) < 0){
+    if(ret < 0){
         printf("getFileSize %s error, fd = %d\n", file_path, fd);
         printf("getFileSize fstat error, id %d, %s\n", errno, strerror(errno));
         exit(-1);
@@ -341,27 +343,21 @@ void writeSyndromeCellFile(long cell_size, int p){
     memset(read_buf, 0, BUFF_SIZE);
     
     int* fds=(int*)malloc(p*sizeof(int));
-    long rest_size = cell_size;
+    
     for(int col=1; col<=p-1; col++){
         int row = p-col-1;
         fds[col] = Open(origin_strip_names[col], O_RDONLY);
         lseek(fds[col], row*cell_size, SEEK_SET);    
     }
 
-    while(1){
-        int end = 0;
+    long rest_size = cell_size;
+    while(rest_size > 0){
         int n = 0;
         memset(write_buf, 0, BUFF_SIZE);
         for(int i=1; i<=p-1; i++){
             n = read(fds[i], read_buf, rest_size<BUFF_SIZE?rest_size:BUFF_SIZE);
-            if(n == 0){
-                end = 1;
-                break;
-            }
             XOR(write_buf, read_buf, n);
         }
-        if(end==1)
-            break;
         rest_size -= n;
         write(fd_syn, write_buf, n);
     }
