@@ -84,6 +84,7 @@ int getMeta(char* file_name, char* meta_buf){
     FILE *fp; 
     if((fp = fopen(metaFilePath,"r")) == NULL){
         printf("getMeta fopen error!\n");
+        printf("error is %s\n", strerror(errno));
         exit(-1);
     }
     int index = 0;
@@ -352,14 +353,15 @@ void writeSyndromeCellFile(long cell_size, int p){
 
     long rest_size = cell_size;
     while(rest_size > 0){
-        int n = 0;
+        int read_size = 0;
         memset(write_buf, 0, BUFF_SIZE);
         for(int i=1; i<=p-1; i++){
-            n = read(fds[i], read_buf, rest_size<BUFF_SIZE?rest_size:BUFF_SIZE);
-            XOR(write_buf, read_buf, n);
+            read_size = rest_size<BUFF_SIZE?rest_size:BUFF_SIZE;
+            read(fds[i], read_buf, read_size);
+            XOR(write_buf, read_buf, read_size);
         }
-        rest_size -= n;
-        write(fd_syn, write_buf, n);
+        rest_size -= read_size;
+        write(fd_syn, write_buf, read_size);
     }
 
     off_t syndrome_size;
