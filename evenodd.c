@@ -570,6 +570,8 @@ void restoreOneLostDataStrip(const char* strip_name, int m, int lost_index){
     for(int i=0; i<=m; i++)
         if(i != lost_index)
             close(fds[i]);
+    free(write_buf);
+    free(read_buf);
 }
 
 void removeRestoredOneLostDataStrip(const char* strip_name){
@@ -655,6 +657,8 @@ void formula_5(int m, int lost_index){
             close(fds[i]);
         else if(i==m+1)
             close(fds[i]); 
+    free(write_buf);
+    free(read_buf);
 }
 
 void formula_6(int m, int lost_index){
@@ -725,6 +729,8 @@ void formula_6(int m, int lost_index){
             close(fds[i]);
         else if(i==m+1)
             close(fds[i]);
+    free(write_buf);
+    free(read_buf);
 }
 
 void readLostDataAndHorizon_Situation(int m, const char* save_as, int padding_zero){
@@ -779,10 +785,12 @@ void formula_7(int m){
         accumulate_size += read_size;
     }
     
-    // 3.关闭文件
+    // 3.关闭文件释放空间
     close(fd_diagonal);
     close(fd_horizontal);
     close(fd_tmp_s);
+    free(write_buf);
+    free(read_buf);
 }
 
 void formula_8(int m, int lost_i, int lost_j, 
@@ -837,12 +845,14 @@ void formula_8(int m, int lost_i, int lost_j,
         }
     }
 
-    // 3.关闭文件
+    // 3.关闭文件 释放空间
     for(int u=0; u<=m-1; u++)
         close(hs_fds[u]);
     for(int i=0; i<=m; i++)
         if(i!=lost_i && i!=lost_j)
             close(fds[i]);
+    free(write_buf);
+    free(read_buf);
 }
 
 void formula_9(int m, int lost_i, int lost_j, 
@@ -932,6 +942,8 @@ void formula_9(int m, int lost_i, int lost_j,
     for(int i=0; i<=m-1; i++)
         if(i!=lost_i && i!=lost_j)
             close(fds[i]);
+    free(write_buf);
+    free(read_buf);
 }
 
 void XORcell(int dest_fd, int* src_fds, int src_num, long cell_size){
