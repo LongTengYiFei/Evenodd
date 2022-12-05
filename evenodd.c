@@ -54,7 +54,7 @@ int Open(const char* __file, int __oflag, ...){
 
     #ifndef RELEASE
     if(fd < 0){
-        printf("Open file %s error, id %d, %s\n", __file, errno, strerror(errno));
+        printf("open file %s error, id %d, %s\n", __file, errno, strerror(errno));
         exit(-1);
     }
     #endif RELEASE
@@ -63,7 +63,7 @@ int Open(const char* __file, int __oflag, ...){
 }
 
 long getFileSize(char* file_path){
-    int fd = Open(file_path, O_RDONLY);
+    int fd = open(file_path, O_RDONLY);
     struct stat _stat;
 
     int ret = fstat(fd, &_stat);
@@ -206,12 +206,12 @@ void dataDiskFolderCheckAndMake(int p){
 }
 
 void metaTxtCheckAndMake(){
-    int fd = Open(metaFilePath, O_RDWR | O_CREAT, FILE_RIGHT);
+    int fd = open(metaFilePath, O_RDWR | O_CREAT, FILE_RIGHT);
     close(fd);
 }
 
 void saveFileMeta(const char* meta_database_file_path, const char* file_path, int prime){
-    int fd = Open(meta_database_file_path, O_RDWR | O_APPEND);
+    int fd = open(meta_database_file_path, O_RDWR | O_APPEND);
     char prime_s[16] = {0};
     sprintf(prime_s, "%d", prime);
 
@@ -280,11 +280,11 @@ void stripNameInit(int p, int file_id){
 
 void writeOriginStrip(char* file_path, int p){
     //数据列
-    int fd_source = Open(file_path, O_RDONLY);
+    int fd_source = open(file_path, O_RDONLY);
     long strip_size = stripSize(file_path, p);
     
     for(int i=0; i<=p-1; i++){
-        int fd_strip = Open(origin_strip_names[i], O_RDWR | O_CREAT, FILE_RIGHT);
+        int fd_strip = open(origin_strip_names[i], O_RDWR | O_CREAT, FILE_RIGHT);
         if(ftruncate(fd_strip, strip_size) < 0){
             printf("truncate error, %d, %s, errno %d\n", i, strerror(errno), errno);
             exit(-1);
@@ -318,9 +318,9 @@ void writeRedundancyFileHorizontal(int p){
     
     int* fds=(int*)malloc(p*sizeof(int));
     for(int i=0; i<=p-1; i++)
-        fds[i] = Open(origin_strip_names[i], O_RDONLY);
+        fds[i] = open(origin_strip_names[i], O_RDONLY);
     
-    int hangFd = Open(horizontal_strip_name, O_WRONLY | O_CREAT | O_APPEND, FILE_RIGHT);
+    int hangFd = open(horizontal_strip_name, O_WRONLY | O_CREAT | O_APPEND, FILE_RIGHT);
     const long strip_size = getFileSize(origin_strip_names[0]);
     const long cell_size = strip_size / (p-1);
     for(int i=0; i<=p-2; i++)
@@ -337,7 +337,7 @@ void writeRedundancyFileHorizontal(int p){
 }
 
 void writeSyndromeCellFile(long cell_size, int p){
-    int fd_syn = Open(tmp_syndrome_file_path, O_RDWR | O_APPEND | O_CREAT, FILE_RIGHT);
+    int fd_syn = open(tmp_syndrome_file_path, O_RDWR | O_APPEND | O_CREAT, FILE_RIGHT);
     unsigned char* write_buf = (unsigned char*)malloc(BUFF_SIZE);
     memset(write_buf, 0, BUFF_SIZE);
     unsigned char* read_buf = (unsigned char*)malloc(BUFF_SIZE);
@@ -347,7 +347,7 @@ void writeSyndromeCellFile(long cell_size, int p){
     
     for(int col=1; col<=p-1; col++){
         int row = p-col-1;
-        fds[col] = Open(origin_strip_names[col], O_RDONLY);
+        fds[col] = open(origin_strip_names[col], O_RDONLY);
         lseek(fds[col], row*cell_size, SEEK_SET);    
     }
 
@@ -387,12 +387,12 @@ void removeTmpFile(const char* s){
 }
 
 void writeRedundancyFileDiagonal(long cell_size, int m){
-    int synFd = Open(tmp_syndrome_file_path, O_RDONLY, FILE_RIGHT);
-    int duiFd = Open(diagonal_strip_name, O_WRONLY | O_CREAT | O_APPEND, FILE_RIGHT);
+    int synFd = open(tmp_syndrome_file_path, O_RDONLY, FILE_RIGHT);
+    int duiFd = open(diagonal_strip_name, O_WRONLY | O_CREAT | O_APPEND, FILE_RIGHT);
 
     int* fds=(int*)malloc(m*sizeof(int));
     for(int i=0; i<=m-1; i++)
-        fds[i] = Open(origin_strip_names[i], O_RDONLY);
+        fds[i] = open(origin_strip_names[i], O_RDONLY);
     
     unsigned char* write_buf = (unsigned char*)malloc(BUFF_SIZE);
     unsigned char* read_buf = (unsigned char*)malloc(BUFF_SIZE);
@@ -510,7 +510,7 @@ void lostScanM(int m){
 }
 
 void mergeDataStrip(const char** data_strip_names, int m, const char* save_as, int padding_zero){
-    int fd_save = Open(save_as, O_WRONLY | O_CREAT, FILE_RIGHT);
+    int fd_save = open(save_as, O_WRONLY | O_CREAT, FILE_RIGHT);
     long strip_size = getFileSize(data_strip_names[0]);
     if(ftruncate(fd_save, strip_size*m) < 0){
         printf("mergeDataStrip ftruncate1 error, %s\n", strerror(errno));
@@ -519,7 +519,7 @@ void mergeDataStrip(const char** data_strip_names, int m, const char* save_as, i
     lseek(fd_save, 0, SEEK_SET);
 
     for(int i=0; i<=m-1; i++){
-        int fd_strip = Open(data_strip_names[i], O_RDONLY, FILE_RIGHT);
+        int fd_strip = open(data_strip_names[i], O_RDONLY, FILE_RIGHT);
         long rest_size = strip_size;
         while(rest_size > 0){
             long send_size = rest_size < BUFF_SIZE ? rest_size : BUFF_SIZE;
@@ -539,13 +539,13 @@ void mergeDataStrip(const char** data_strip_names, int m, const char* save_as, i
 }
 
 void restoreOneLostDataStrip(const char* strip_name, int m, int lost_index){
-    int fd_restore_strip = Open(strip_name, O_WRONLY | O_CREAT | O_APPEND, FILE_RIGHT);
+    int fd_restore_strip = open(strip_name, O_WRONLY | O_CREAT | O_APPEND, FILE_RIGHT);
     int* fds = (int*)calloc(m, sizeof(int));
     for(int i=0; i<=m; i++){
         if(i<m && i!=lost_index){//data strip
-            fds[i] = Open(origin_strip_names[i], O_RDONLY);
+            fds[i] = open(origin_strip_names[i], O_RDONLY);
         }else if(i==m){//horizon parity strip
-            fds[i] = Open(horizontal_strip_name, O_RDONLY);
+            fds[i] = open(horizontal_strip_name, O_RDONLY);
         }
     }
 
@@ -596,18 +596,18 @@ int notation(int n, int m){
 
 void formula_5(int m, int lost_index){
     // 1.准备文件
-    int fd_tmp_s = Open(formula_5_tmp_S_cell_file_path, 
+    int fd_tmp_s = open(formula_5_tmp_S_cell_file_path, 
                         O_WRONLY | O_CREAT | O_APPEND, FILE_RIGHT);
 
     int* fds = (int*)calloc(m+2, sizeof(int));
     for(int i=0; i<=m+1; i++){
         if(i<m && i!=lost_index){
-            fds[i] = Open(origin_strip_names[i], O_RDONLY);
+            fds[i] = open(origin_strip_names[i], O_RDONLY);
         }else if(i==m){
             //horizon has been lost, do not care.
             ;
         }else if(i==m+1){
-            fds[i] = Open(diagonal_strip_name, O_RDONLY); 
+            fds[i] = open(diagonal_strip_name, O_RDONLY); 
         }
     }
 
@@ -665,20 +665,20 @@ void formula_6(int m, int lost_index){
     // <formula5 S文件> + <对角线校验列> + <未丢失的数据列> --> <丢失的数据列>
 
     // 1.准备文件
-    int fd_restore_strip = Open(origin_strip_names[lost_index], 
+    int fd_restore_strip = open(origin_strip_names[lost_index], 
         O_WRONLY | O_CREAT | O_APPEND, FILE_RIGHT);
 
-    int fd_sfile = Open(formula_5_tmp_S_cell_file_path, O_RDONLY);
+    int fd_sfile = open(formula_5_tmp_S_cell_file_path, O_RDONLY);
 
     int* fds = (int*)calloc(m+2, sizeof(int));
     for(int i=0; i<=m+1; i++){
         if(i<m && i!=lost_index){
-            fds[i] = Open(origin_strip_names[i], O_RDONLY);
+            fds[i] = open(origin_strip_names[i], O_RDONLY);
         }else if(i==m){
             //horizon has been lost, do not care.
             ;
         }else if(i==m+1){
-            fds[i] = Open(diagonal_strip_name, O_RDONLY); 
+            fds[i] = open(diagonal_strip_name, O_RDONLY); 
         }
     }
 
@@ -746,11 +746,11 @@ void readLostDataAndHorizon_Situation(int m, const char* save_as, int padding_ze
 
 void formula_7(int m){
     // 1.准备文件
-    int fd_tmp_s = Open(formula_7_tmp_S_cell_file_path, 
+    int fd_tmp_s = open(formula_7_tmp_S_cell_file_path, 
                         O_WRONLY | O_CREAT | O_APPEND, FILE_RIGHT);
 
-    int fd_horizontal = Open(horizontal_strip_name, O_RDONLY);
-    int fd_diagonal = Open(diagonal_strip_name, O_RDONLY);
+    int fd_horizontal = open(horizontal_strip_name, O_RDONLY);
+    int fd_diagonal = open(diagonal_strip_name, O_RDONLY);
 
     // 2.XOR write
     unsigned char* write_buf = (unsigned char*)calloc(1, BUFF_SIZE);
@@ -804,15 +804,15 @@ void formula_8(int m, int lost_i, int lost_j,
     int* fds = (int*)calloc(m+1, sizeof(int));
     for(int i=0; i<=m; i++){
         if(i<m && i!=lost_i && i!=lost_j){
-            fds[i] = Open(data_names[i], O_RDONLY);
+            fds[i] = open(data_names[i], O_RDONLY);
         }else if(i==m){
-            fds[i] = Open(horizontal_name, O_RDONLY); 
+            fds[i] = open(horizontal_name, O_RDONLY); 
         }
     }
     // 行syndrome文件
     int* hs_fds = (int*)calloc(m, sizeof(int));
     for(int u=0; u<=m-1; u++){
-        hs_fds[u]= Open(horizontal_syndrome_names[u], O_WRONLY | O_CREAT | O_APPEND, FILE_RIGHT);
+        hs_fds[u]= open(horizontal_syndrome_names[u], O_WRONLY | O_CREAT | O_APPEND, FILE_RIGHT);
         lseek(hs_fds[u], 0, SEEK_SET);
     }
     
@@ -865,17 +865,17 @@ void formula_9(int m, int lost_i, int lost_j,
     // 目标：对角线syndrome文件
     int* ds_fds = (int*)calloc(m, sizeof(int));
     for(int u=0; u<=m-1; u++){
-        ds_fds[u]= Open(diagonal_syndrome_names[u], O_WRONLY | O_CREAT | O_APPEND, FILE_RIGHT);
+        ds_fds[u]= open(diagonal_syndrome_names[u], O_WRONLY | O_CREAT | O_APPEND, FILE_RIGHT);
         lseek(ds_fds[u], 0, SEEK_SET);
     }
     // 源：<formula7产生的S> <对角线校验列> <未丢失的数据列>
-    int fd_s_7 = Open(formula_7_s_name, O_RDONLY);
-    int fd_diagonal = Open(diagonal_name, O_RDONLY);
+    int fd_s_7 = open(formula_7_s_name, O_RDONLY);
+    int fd_diagonal = open(diagonal_name, O_RDONLY);
 
     int* fds = (int*)calloc(m, sizeof(int));
     for(int i=0; i<=m-1; i++){
         if(i!=lost_i && i!=lost_j)
-            fds[i] = Open(data_names[i], O_RDONLY);
+            fds[i] = open(data_names[i], O_RDONLY);
     }
 
     // 2.XOR write
@@ -988,18 +988,18 @@ void recursive123(int m, int lost_i, int lost_j,
     const long strip_size = getFileSize(diagonal_strip_name);
     const long cell_size = strip_size / (m-1);
 
-    int fd_i = Open(i_name, O_CREAT | O_RDWR, FILE_RIGHT);
+    int fd_i = open(i_name, O_CREAT | O_RDWR, FILE_RIGHT);
     ftruncate(fd_i, strip_size);
         
-    int fd_j = Open(j_name, O_CREAT | O_RDWR, FILE_RIGHT);
+    int fd_j = open(j_name, O_CREAT | O_RDWR, FILE_RIGHT);
     ftruncate(fd_j, strip_size);
 
     // 源：formula 9 产生的m个行syndrome和m个对角线syndrome
     int* hs_fds = (int*)calloc(m, sizeof(int));
     int* ds_fds = (int*)calloc(m, sizeof(int));
     for(int u=0; u<=m-1; u++){
-        hs_fds[u] = Open(horizontal_syndrome_names[u], O_RDONLY);
-        ds_fds[u] = Open(diagonal_syndrome_names[u], O_RDONLY);
+        hs_fds[u] = open(horizontal_syndrome_names[u], O_RDONLY);
+        ds_fds[u] = open(diagonal_syndrome_names[u], O_RDONLY);
     }
 
     // 2.XOR write
