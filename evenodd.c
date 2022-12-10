@@ -1218,7 +1218,13 @@ void repairTwoLostStrip(int m, int padding_zero){
     formula_9_tmp_S1_name_free(m);
 }
 
-void repairFile(int file_id, int m, long padding_zero){
+void repairFile(int file_id, int m, long padding_zero, int num1, int num2){
+    /*
+        修复情况：
+        丢了1个disk，修复1个disk，num1有效，num2无效；
+        丢了2个disk，只修复1个disk，num1有效，num2无效；
+        丢了2个disk，修复2个disk，num1有效，num2有效；
+    */
     // 有可能这个文件没丢失disk
     #ifndef RELEASE
     printf("file %d, m=%d, padding zero=%ld\n", file_id, m, padding_zero);
@@ -1232,17 +1238,19 @@ void repairFile(int file_id, int m, long padding_zero){
             break;
 
         case 1:
-            if(lost_index_i <= m-1){
-                restoreOneLostDataStrip(origin_strip_names[lost_index_i], m, lost_index_i);
-            }
-            else if(lost_index_i == m){
-                writeRedundancyFileHorizontal(m);
-            }
-            else if(lost_index_i == m+1){
-                long cell_size = getFileSize(horizontal_strip_name) / (m-1);
-                writeSyndromeCellFile(cell_size, m);
-                writeRedundancyFileDiagonal(cell_size, m);
-                removeTmpFile(tmp_syndrome_file_path);
+            if(lost_disk_i == num1 || lost_disk_i == num2){
+                if(lost_index_i <= m-1){
+                    restoreOneLostDataStrip(origin_strip_names[lost_index_i], m, lost_index_i);
+                }
+                else if(lost_index_i == m){
+                    writeRedundancyFileHorizontal(m);
+                }
+                else if(lost_index_i == m+1){
+                    long cell_size = getFileSize(horizontal_strip_name) / (m-1);
+                    writeSyndromeCellFile(cell_size, m);
+                    writeRedundancyFileDiagonal(cell_size, m);
+                    removeTmpFile(tmp_syndrome_file_path);
+                }
             }
             break;
 
@@ -1251,28 +1259,42 @@ void repairFile(int file_id, int m, long padding_zero){
                 #ifndef RELEASE
                 printf("丢失两个校验列...\n", file_id);
                 #endif
-                writeRedundancyFileHorizontal(m);
-                long cell_size = getFileSize(horizontal_strip_name) / (m-1);
-                writeSyndromeCellFile(cell_size, m);
-                writeRedundancyFileDiagonal(cell_size, m);
-                removeTmpFile(tmp_syndrome_file_path);
+                if(lost_index_i == num1 || lost_index_i == num2){
+                    // 恢复行校验列
+                    writeRedundancyFileHorizontal(m);
+                }
+                if(lost_index_j == num1 || lost_index_j == num2){
+                    // 恢复对角线校验列
+                    long cell_size = getFileSize(horizontal_strip_name) / (m-1);
+                    writeSyndromeCellFile(cell_size, m);
+                    writeRedundancyFileDiagonal(cell_size, m);
+                    removeTmpFile(tmp_syndrome_file_path);
+                }
             }
             else if(lost_index_i < m && lost_index_j == m){
-                // 恢复数据列
-                formula_5(m, lost_index_i);
-                formula_6(m, lost_index_i);
-                removeTmpFile(formula_5_tmp_S_cell_file_path);
-                // 恢复行校验列
-                writeRedundancyFileHorizontal(m);
+                if(lost_index_i == num1 || lost_index_i == num2){
+                    // 恢复数据列
+                    formula_5(m, lost_index_i);
+                    formula_6(m, lost_index_i);
+                    removeTmpFile(formula_5_tmp_S_cell_file_path);
+                }
+                if(lost_index_j == num1 || lost_index_j == num2){
+                    // 恢复行校验列
+                    writeRedundancyFileHorizontal(m); 
+                }
             }
             else if(lost_index_i < m && lost_index_j == m+1){
-                // 恢复数据列
-                restoreOneLostDataStrip(origin_strip_names[lost_index_i], m, lost_index_i);
-                // 恢复对角线校验列
-                long cell_size = getFileSize(horizontal_strip_name) / (m-1);
-                writeSyndromeCellFile(cell_size, m);
-                writeRedundancyFileDiagonal(cell_size, m);
-                removeTmpFile(tmp_syndrome_file_path);
+                if(lost_index_i == num1 || lost_index_i == num2){
+                    // 恢复数据列
+                    restoreOneLostDataStrip(origin_strip_names[lost_index_i], m, lost_index_i);
+                }
+                if(lost_index_j == num1 || lost_index_j == num2){
+                    // 恢复对角线校验列
+                    long cell_size = getFileSize(horizontal_strip_name) / (m-1);
+                    writeSyndromeCellFile(cell_size, m);
+                    writeRedundancyFileDiagonal(cell_size, m);
+                    removeTmpFile(tmp_syndrome_file_path);
+                }
             }
             else if(lost_index_i < m && lost_index_j < m){
                 #ifndef RELEASE
@@ -1289,7 +1311,7 @@ void repairFile(int file_id, int m, long padding_zero){
     freeStripNames(m);
 }
 
-void evenoddRepair(){
+void evenoddRepair(int repair_num1, int repair_num2){
     time_t seconds_start;
     seconds_start = time(NULL);
 
@@ -1326,8 +1348,8 @@ void evenoddRepair(){
     dataDiskFolderCheckAndMake(max_m);
 
     for(int i=0; i<=sum-1; i++)
-        repairFile(i, meta_m[i], meta_pad[i]);
-    
+        repairFile(i, meta_m[i], meta_pad[i], repair_num1, repair_num2);
+        
     #ifndef RELEASE
     printf("文件共计%d个\n", sum);
     #endif
@@ -1371,14 +1393,14 @@ int main(int argc, char** argv){
                 #ifndef RELEASE
                 printf("修复丢失的disk%d...\n", atoi(argv[3]));
                 #endif
+                evenoddRepair(atoi(argv[3]), -1);
             }
             else if(number_erasures == 2){
                 #ifndef RELEASE
                 printf("修复丢失的disk%d disk%d...\n", atoi(argv[3]), atoi(argv[4]));
                 #endif
-            }
-            //后面的参数好像没啥用
-            evenoddRepair();
+                evenoddRepair(atoi(argv[3]), atoi(argv[4]));
+            }  
         }
     }
     else{
