@@ -12,6 +12,7 @@
 #include <stdbool.h>
 #include <time.h>
 #include <stdarg.h>
+#include <pthread.h>
 
 #define RELEASE
 #define FILE_RIGHT 0777
@@ -441,18 +442,50 @@ void writeRedundancyFileDiagonal(long cell_size, int m){
     free(fds);
 }
 
+typedef struct horARG{
+    int p;
+}horARG;
+
+typedef struct diaARG{
+    char* file_path;
+    int p;
+}diaARG;
+
+void thread_wirte_horizontal(void* args){
+    horARG* r = (horARG*)args;
+    writeRedundancyFileHorizontal(r->p);
+}
+
+void thread_write_diagonal(void* args){
+    diaARG* r = (diaARG*)args;
+    long cell_size = cellSize(r->file_path, r->p);
+    writeSyndromeCellFile(cell_size, r->p);
+    writeRedundancyFileDiagonal(cell_size, r->p);
+    removeTmpFile(tmp_syndrome_file_path);//使用全局变量
+}
+
 void evenoddWrite(char* file_path, int p){
     dataDiskFolderCheckAndMake(p);
     stripNameInit(p, getMetaNums());
     saveFileMeta(metaFilePath, file_path, p);
     
     writeOriginStrip(file_path, p);
-    writeRedundancyFileHorizontal(p);
+    
+    // 针对数据列只有并发读。
+    pthread_t t_hor;
+    horARG args1;
+    args1.p = p;
+    pthread_create(&t_hor, NULL, thread_wirte_horizontal, &args1);
 
-    long cell_size = cellSize(file_path, p);
-    writeSyndromeCellFile(cell_size, p);
-    writeRedundancyFileDiagonal(cell_size, p);
-    removeTmpFile(tmp_syndrome_file_path);
+    pthread_t t_dia;
+    diaARG args2;
+    args2.p = p;
+    args2.file_path = file_path;
+    pthread_create(&t_dia, NULL, thread_write_diagonal, &args2);
+
+    void* thread_result;
+    pthread_join(t_hor, &thread_result);
+    pthread_join(t_dia, &thread_result);
 }
 
 /*
