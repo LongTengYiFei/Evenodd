@@ -57,7 +57,7 @@ int Open(const char* __file, int __oflag, ...){
         printf("open file %s error, id %d, %s\n", __file, errno, strerror(errno));
         exit(-1);
     }
-    #endif RELEASE
+    #endif
 
     return fd;
 }
@@ -1109,40 +1109,58 @@ void evenoddRead(const char* file_name, const char* save_as){
     }
     if(lost_num == 1){
         if(lost_index_i <= m-1){
-            printf("丢失一个数据列 %d.\n", lost_index_i);
+            #ifndef RELEASE 
+            printf("丢失一个数据列 %d.\n", lost_index_i); 
+            #endif
             readLostDataStrip_Situation(m, save_as, padding_zero);
         }
         else if(lost_index_i == m){
+            #ifndef RELEASE
             printf("丢失一个行校验列 %d.\n", lost_index_i);
+            #endif
             mergeDataStrip(origin_strip_names, m, save_as, padding_zero);
         }
         else if(lost_index_i == m+1){
+            #ifndef RELEASE
             printf("丢失一个对角线列 %d.\n", lost_index_i);
+            #endif
             mergeDataStrip(origin_strip_names, m, save_as, padding_zero);
         }
     }else if(lost_num == 2){
         if(lost_index_i == m && lost_index_j == m+1){
+            #ifndef RELEASE
             printf("丢失两个校验列\n");
+            #endif
             mergeDataStrip(origin_strip_names, m, save_as, padding_zero);
         }
         else if(lost_index_i < m && lost_index_j == m){
+            #ifndef RELEASE
             printf("丢失一个数据列%d 和 一个行校验列. 直接用对角线校验列恢复数据列，不用管行校验列\n", lost_index_i);
+            #endif
             readLostDataAndHorizon_Situation(m, save_as, padding_zero);
         }
         else if(lost_index_i < m && lost_index_j == m+1){
+            #ifndef RELEASE
             printf("丢失一个数据列, 一个对角线校验列. 相当于丢失一个数据列，用行校验列恢复就行.\n");
+            #endif
             readLostDataStrip_Situation(m, save_as, padding_zero);
         }
         else if(lost_index_i < m && lost_index_j < m){
+            #ifndef RELEASE
             printf("丢失两个数据列 %d, %d.\n", lost_index_i, lost_index_j);
+            #endif
             readLostTwoData_Situation(m, save_as, padding_zero);
         }
         else{
+            #ifndef RELEASE
             printf("奇怪的错误 i=%d, j=%d\n", lost_index_i, lost_index_j);
+            #endif
             exit(-1);  
         }
     }else if(lost_num == 0){
+        #ifndef RELEASE
         printf("未丢失数据列.\n");
+        #endif
         mergeDataStrip(origin_strip_names, m, save_as, padding_zero);
     }else{
         printf("impossible...\n");
@@ -1152,7 +1170,9 @@ void evenoddRead(const char* file_name, const char* save_as){
     // save as是读的时候另存为的名字，这里另存为的地方应该是和evenodd同目录的地方
     time_t seconds_end;
     seconds_end = time(NULL);
+    #ifndef RELEASE
     printf("本次读操作消耗 = %ld秒\n", seconds_end - seconds_start);
+    #endif
 }
 
 // ----- ----- ----- REPAIR ----- ----- -----
@@ -1200,8 +1220,9 @@ void repairTwoLostStrip(int m, int padding_zero){
 
 void repairFile(int file_id, int m, long padding_zero){
     // 有可能这个文件没丢失disk
+    #ifndef RELEASE
     printf("file %d, m=%d, padding zero=%ld\n", file_id, m, padding_zero);
-    
+    #endif
     stripNameInit(m, file_id);
     lostScanM(m);
 
@@ -1227,7 +1248,9 @@ void repairFile(int file_id, int m, long padding_zero){
 
         case 2:
             if(lost_index_i == m && lost_index_j == m+1){
+                #ifndef RELEASE
                 printf("丢失两个校验列...\n", file_id);
+                #endif
                 writeRedundancyFileHorizontal(m);
                 long cell_size = getFileSize(horizontal_strip_name) / (m-1);
                 writeSyndromeCellFile(cell_size, m);
@@ -1252,7 +1275,9 @@ void repairFile(int file_id, int m, long padding_zero){
                 removeTmpFile(tmp_syndrome_file_path);
             }
             else if(lost_index_i < m && lost_index_j < m){
+                #ifndef RELEASE
                 printf("丢失两个数据列...\n", file_id);
+                #endif
                 repairTwoLostStrip(m, padding_zero);
             }
             break;
@@ -1303,12 +1328,16 @@ void evenoddRepair(){
     for(int i=0; i<=sum-1; i++)
         repairFile(i, meta_m[i], meta_pad[i]);
     
+    #ifndef RELEASE
     printf("文件共计%d个\n", sum);
+    #endif
     fclose(fp);
     
     time_t seconds_end;
     seconds_end = time(NULL);
+    #ifndef RELEASE
     printf("本次修复操作消耗 = %ld秒\n", seconds_end - seconds_start);
+    #endif
 }
 
 int main(int argc, char** argv){
@@ -1330,16 +1359,24 @@ int main(int argc, char** argv){
     else if(strcmp(operation_type, "repair") == 0){
         number_erasures =atoi(argv[2]);
         if(number_erasures <= 0){
+            #ifndef RELEASE
             printf("修复数量不能小于等于0!\n");
+            #endif
             exit(-1);
         }else if(number_erasures >= 3){
             printf("Too many corruptions!!\n");
             exit(-1);
         }else{
-            if(number_erasures == 1)
+            if(number_erasures == 1){
+                #ifndef RELEASE
                 printf("修复丢失的disk%d...\n", atoi(argv[3]));
-            else if(number_erasures == 2)
+                #endif
+            }
+            else if(number_erasures == 2){
+                #ifndef RELEASE
                 printf("修复丢失的disk%d disk%d...\n", atoi(argv[3]), atoi(argv[4]));
+                #endif
+            }
             //后面的参数好像没啥用
             evenoddRepair();
         }
