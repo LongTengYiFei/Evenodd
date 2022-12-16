@@ -12,6 +12,7 @@
 #include <stdbool.h>
 #include <time.h>
 #include <stdarg.h>
+#include <pthread.h>
 
 #define RELEASE
 #define FILE_RIGHT 0777
@@ -386,6 +387,58 @@ void removeTmpFile(const char* s){
     }
 }
 
+typedef struct diaARG{
+    int start_pos;
+    int end_pos;
+    int* fds;
+    int m;
+    int synFd;
+    int duiFd;
+    long cell_size;
+}diaARG;
+
+void writeRedundancyFileDiagonalThread(void* args){
+    diaARG* r = (diaARG*)args;
+    unsigned char* write_buf = (unsigned char*)malloc(BUFF_SIZE);
+    unsigned char* read_buf = (unsigned char*)malloc(BUFF_SIZE);
+    for(int l=r->start_pos; l<=r->end_pos; l++){
+        // 数据列推到指定格子
+        for(int t=0; t<=r->m-1; t++){
+            int pos = notation(l-t, r->m);
+            lseek(r->fds[t], pos*r->cell_size, SEEK_SET);
+        }
+            
+        // syndrome文件offset回到起点
+        lseek(r->synFd, 0, SEEK_SET);
+
+        long rest_size = r->cell_size;
+        while(rest_size > 0){
+            int read_size = rest_size<BUFF_SIZE?rest_size:BUFF_SIZE;
+            memset(write_buf, 0, BUFF_SIZE);
+
+            // 数据列异或
+            for(int t=0; t<=r->m-1; t++){
+                // 如果这个数据列被推到了m-1行，那么就不异或
+                if(notation(l-t, r->m) != (r->m-1)){
+                    read(r->fds[t], read_buf, read_size);
+                    XOR(write_buf, read_buf, read_size);
+                } 
+            }
+
+            // syndrom异或
+            read(r->synFd, read_buf, read_size);
+            XOR(write_buf, read_buf, read_size);
+
+            // write
+            write(r->duiFd, write_buf, read_size);
+
+            rest_size -= read_size;
+        }
+    }
+    free(write_buf);
+    free(read_buf);
+}
+
 void writeRedundancyFileDiagonal(long cell_size, int m){
     int synFd = open(tmp_syndrome_file_path, O_RDONLY, FILE_RIGHT);
     int duiFd = open(diagonal_strip_name, O_WRONLY | O_CREAT | O_APPEND, FILE_RIGHT);
@@ -394,50 +447,37 @@ void writeRedundancyFileDiagonal(long cell_size, int m){
     for(int i=0; i<=m-1; i++)
         fds[i] = open(origin_strip_names[i], O_RDONLY);
     
-    unsigned char* write_buf = (unsigned char*)malloc(BUFF_SIZE);
-    unsigned char* read_buf = (unsigned char*)malloc(BUFF_SIZE);
-    for(int l=0; l<=m-2; l++){
-        // 数据列推到指定格子
-        for(int t=0; t<=m-1; t++){
-            int pos = notation(l-t, m);
-            lseek(fds[t], pos*cell_size, SEEK_SET);
-        }
-            
-        // syndrome文件offset回到起点
-        lseek(synFd, 0, SEEK_SET);
+    // 两个线程写一个对角线校验列，每个写一半；
+    pthread_t t1;
+    diaARG args1;
+    args1.cell_size = cell_size;
+    args1.duiFd = duiFd;
+    args1.fds = fds;
+    args1.m = m;
+    args1.synFd = synFd;
+    args1.start_pos = 0;
+    args1.end_pos = m/2-1;
+    pthread_create(&t1, NULL, writeRedundancyFileDiagonalThread, &args1);
 
-        long rest_size = cell_size;
-        while(rest_size > 0){
-            int read_size = rest_size<BUFF_SIZE?rest_size:BUFF_SIZE;
-            memset(write_buf, 0, BUFF_SIZE);
+    pthread_t t2;
+    diaARG args2;
+    args2.cell_size = cell_size;
+    args2.duiFd = duiFd;
+    args2.fds = fds;
+    args2.m = m;
+    args2.synFd = synFd;
+    args2.start_pos = m/2;
+    args2.end_pos = m-2;
+    pthread_create(&t2, NULL, writeRedundancyFileDiagonalThread, &args2);
 
-            // 数据列异或
-            for(int t=0; t<=m-1; t++){
-                // 如果这个数据列被推到了m-1行，那么就不异或
-                if(notation(l-t, m) != (m-1)){
-                    read(fds[t], read_buf, read_size);
-                    XOR(write_buf, read_buf, read_size);
-                } 
-            }
-
-            // syndrom异或
-            read(synFd, read_buf, read_size);
-            XOR(write_buf, read_buf, read_size);
-
-            // write
-            write(duiFd, write_buf, read_size);
-
-            rest_size -= read_size;
-        }
-    }
+    void* thread_result;
+    pthread_join(t1, &thread_result);
+    pthread_join(t2, &thread_result);
 
     close(duiFd);
     close(synFd);
     for(int i=0; i<=m-1; i++)   
         close(fds[i]);
-    
-    free(write_buf);
-    free(read_buf);
     free(fds);
 }
 
@@ -980,8 +1020,6 @@ void recursive123(int m, int lost_i, int lost_j,
                     const char* j_name,
                     const char** horizontal_syndrome_names,
                     const char** diagonal_syndrome_names){
-    
-    
     // 1.准备文件
     // 目标：i和j 两个丢失的数据列 不能使用追加写，因为s决定写哪个格子
     // 先把目标列拉长用0填充，然后再写
