@@ -398,21 +398,16 @@ typedef struct diaARG{
 }diaARG;
 
 void writeRedundancyFileDiagonalThread(void* args){
+    // duiFd 并发写
+    // fds 并发读
     diaARG* r = (diaARG*)args;
     unsigned char* write_buf = (unsigned char*)malloc(BUFF_SIZE);
     unsigned char* read_buf = (unsigned char*)malloc(BUFF_SIZE);
-    for(int l=r->start_pos; l<=r->end_pos; l++){
-        // 数据列推到指定格子
-        for(int t=0; t<=r->m-1; t++){
-            int pos = notation(l-t, r->m);
-            lseek(r->fds[t], pos*r->cell_size, SEEK_SET);
-        }
-            
-        // syndrome文件offset回到起点
-        lseek(r->synFd, 0, SEEK_SET);
-
+    long dui_sum = 0;
+    for(int l=r->start_pos; l<=r->end_pos; l++){//对角线有几个格子
         long rest_size = r->cell_size;
-        while(rest_size > 0){
+        long sum = 0;
+        while(rest_size > 0){//每个格子
             int read_size = rest_size<BUFF_SIZE?rest_size:BUFF_SIZE;
             memset(write_buf, 0, BUFF_SIZE);
 
@@ -420,19 +415,21 @@ void writeRedundancyFileDiagonalThread(void* args){
             for(int t=0; t<=r->m-1; t++){
                 // 如果这个数据列被推到了m-1行，那么就不异或
                 if(notation(l-t, r->m) != (r->m-1)){
-                    read(r->fds[t], read_buf, read_size);
+                    pread(r->fds[t], read_buf, read_size, notation(l-t, r->m)*r->cell_size + sum);
                     XOR(write_buf, read_buf, read_size);
                 } 
             }
 
             // syndrom异或
-            read(r->synFd, read_buf, read_size);
+            pread(r->synFd, read_buf, read_size, sum);
             XOR(write_buf, read_buf, read_size);
 
             // write
-            write(r->duiFd, write_buf, read_size);
+            pwrite(r->duiFd, write_buf, read_size, dui_sum + r->start_pos*r->cell_size);
 
             rest_size -= read_size;
+            sum += read_size;
+            dui_sum += read_size;
         }
     }
     free(write_buf);
@@ -441,7 +438,8 @@ void writeRedundancyFileDiagonalThread(void* args){
 
 void writeRedundancyFileDiagonal(long cell_size, int m){
     int synFd = open(tmp_syndrome_file_path, O_RDONLY, FILE_RIGHT);
-    int duiFd = open(diagonal_strip_name, O_WRONLY | O_CREAT | O_APPEND, FILE_RIGHT);
+    int duiFd = open(diagonal_strip_name, O_WRONLY | O_CREAT, FILE_RIGHT);
+    ftruncate(duiFd, cell_size*(m-1));
 
     int* fds=(int*)malloc(m*sizeof(int));
     for(int i=0; i<=m-1; i++)

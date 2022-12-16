@@ -1,2 +1,2 @@
 #!/bin/bash
-gcc -o evenodd evenodd.c -pg -lm -O3 -lpthread
+gcc -o evenodd evenodd.c -lm -lpthread -O3
