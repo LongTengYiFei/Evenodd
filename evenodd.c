@@ -1218,21 +1218,72 @@ void freeStripNames(int m){
     free(diagonal_strip_name);
 }
 
+typedef struct formula_8_ARG{
+    int m;
+    int lost_i;
+    int lost_j;
+    const char** data_names;
+    const char* horizontal_name;
+    const char** horizontal_syndrome_names;
+}formula_8_ARG;
+
+typedef struct formula_9_ARG{
+    int m; 
+    int lost_i; 
+    int lost_j;
+    const char** diagonal_syndrome_names;
+    const char* formula_7_s_name;
+    const char* diagonal_name;
+    const char** data_names;
+}formula_9_ARG;
+
+void thread_formula_8(void* args){
+    formula_8_ARG* r = (formula_8_ARG*)args;
+    formula_8(r->m ,r->lost_i, r->lost_j, 
+                                r->data_names,
+                                r->horizontal_name,
+                                r->horizontal_syndrome_names);
+}
+
+void thread_formula_9(void* args){
+    formula_9_ARG* r = (formula_9_ARG*)args;
+    formula_9(r->m, r->lost_i, r->lost_j,
+                            r->diagonal_syndrome_names,
+                            r->formula_7_s_name,
+                            r->diagonal_name,
+                            r->data_names);
+}
+
 void repairTwoLostStrip(int m, int padding_zero){
     formula_7(m);   
 
     formula_8_tmp_S0_name_init(m);
-    formula_8(m ,lost_index_i, lost_index_j, 
-                                origin_strip_names,
-                                horizontal_strip_name,
-                                formula_8_tmp_S0s);
+    pthread_t t_8;
+    formula_8_ARG args8;
+    args8.m = m;
+    args8.lost_i = lost_index_i;
+    args8.lost_j = lost_index_j;
+    args8.data_names = origin_strip_names;
+    args8.horizontal_name = horizontal_strip_name;
+    args8.horizontal_syndrome_names = formula_8_tmp_S0s;
+    pthread_create(&t_8, NULL, thread_formula_8, &args8);
+
 
     formula_9_tmp_S1_name_init(m);
-    formula_9(m, lost_index_i, lost_index_j,
-                                formula_9_tmp_S1s,
-                                formula_7_tmp_S_cell_file_path,
-                                diagonal_strip_name,
-                                origin_strip_names);
+    pthread_t t_9;
+    formula_9_ARG args9;
+    args9.m = m;
+    args9.lost_i = lost_index_i;
+    args9.lost_j = lost_index_j;
+    args9.diagonal_syndrome_names = formula_9_tmp_S1s;
+    args9.formula_7_s_name = formula_7_tmp_S_cell_file_path;
+    args9.diagonal_name = diagonal_strip_name;
+    args9.data_names = origin_strip_names;
+    pthread_create(&t_9, NULL, thread_formula_9, &args9);
+
+    void* thread_result;
+    pthread_join(t_8, &thread_result);
+    pthread_join(t_9, &thread_result);
 
     recursive123(m, lost_index_i, lost_index_j,
                                     origin_strip_names[lost_index_i],
