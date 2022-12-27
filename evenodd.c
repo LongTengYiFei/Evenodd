@@ -47,22 +47,6 @@ void usage(){
     printf("./evenodd repair <number_erasures> <idx0>\n");
 }
 
-int Open(const char* __file, int __oflag, ...){
-    va_list args;
-    va_start(args, __oflag);
-    int fd = open(__file, __oflag, args);
-    va_end(args);
-
-    #ifndef RELEASE
-    if(fd < 0){
-        printf("open file %s error, id %d, %s\n", __file, errno, strerror(errno));
-        exit(-1);
-    }
-    #endif
-
-    return fd;
-}
-
 long getFileSize(char* file_path){
     int fd = open(file_path, O_RDONLY);
     struct stat _stat;
@@ -571,6 +555,29 @@ void mergeDataStrip(const char** data_strip_names, int m, const char* save_as, i
     }
 }
 
+void mergeDataStrip_destination(const char** data_strip_names, 
+                                int m, 
+                                int fd_save, 
+                                int lost_index,
+                                long strip_size){
+
+    for(int i=0; i<=m-1; i++){
+        if(i != lost_index){
+            int fd_strip = open(data_strip_names[i], O_RDONLY, FILE_RIGHT);
+            lseek(fd_save, i*strip_size, SEEK_SET);
+            long rest_size = strip_size;
+            while(rest_size > 0){
+                long send_size = rest_size < BUFF_SIZE ? rest_size : BUFF_SIZE;
+                if(sendfile(fd_save, fd_strip, NULL, send_size) == -1){
+                    printf("mergeDataStrip sendfile %d error, %s\n", i, strerror(errno));
+                    exit(-1);
+                }
+                rest_size -= send_size;
+            }
+        }
+    }
+}
+
 void restoreOneLostDataStrip(const char* strip_name, int m, int lost_index){
     int fd_restore_strip = open(strip_name, O_WRONLY | O_CREAT | O_APPEND, FILE_RIGHT);
     int* fds = (int*)calloc(m, sizeof(int));
@@ -607,18 +614,76 @@ void restoreOneLostDataStrip(const char* strip_name, int m, int lost_index){
     free(read_buf);
 }
 
-void removeRestoredOneLostDataStrip(const char* strip_name){
-    if(remove(strip_name) == -1){
-        printf("removeRestoredOneLostDataStrip %s [error]\n", strip_name);
-        exit(-1);
+void restoreOneLostDataStrip_destination(int m, int lost_index, 
+                            int fd_save,
+                            long restore_offest,
+                            long strip_size){
+
+    lseek(fd_save, restore_offest, SEEK_SET);
+        
+    int* fds = (int*)calloc(m, sizeof(int));
+    for(int i=0; i<=m; i++){
+        if(i<m && i!=lost_index){//data strip
+            fds[i] = open(origin_strip_names[i], O_RDONLY);
+        }else if(i==m){//horizon parity strip
+            fds[i] = open(horizontal_strip_name, O_RDONLY);
+        }
     }
+
+    unsigned char* write_buf = (unsigned char*)calloc(1, BUFF_SIZE);
+    unsigned char* read_buf = (unsigned char*)calloc(1, BUFF_SIZE);
+
+    long rest_size = strip_size;
+    while(rest_size > 0){
+        memset(write_buf, 0, BUFF_SIZE);//清除上次的残留
+        int read_size = BUFF_SIZE < rest_size ? BUFF_SIZE : rest_size;
+        for(int i=0; i<=m; i++){
+            if(i != lost_index){
+                read(fds[i], read_buf, read_size);
+                XOR(write_buf, read_buf, read_size);
+            }
+        }
+
+        write(fd_save, write_buf, read_size);
+        rest_size -= read_size;
+    } 
+
+    for(int i=0; i<=m; i++)
+        if(i != lost_index)
+            close(fds[i]);
+    free(write_buf);
+    free(read_buf);
 }
 
 void readLostDataStrip_Situation(int m, const char* save_as, int padding_zero){
-    restoreOneLostDataStrip(origin_strip_names[lost_index_i], m, lost_index_i);
-    mergeDataStrip(origin_strip_names, m, save_as, padding_zero);
-    // 题目要求读操作不用顺带修复，所以把刚才修复的strip删掉。
-    removeRestoredOneLostDataStrip(origin_strip_names[lost_index_i]); 
+    // 1.先准备好要恢复的文件
+    int fd_save = open(save_as, O_RDWR | O_CREAT, FILE_RIGHT);
+    long strip_size = getFileSize(horizontal_strip_name);
+    if(ftruncate(fd_save, strip_size * m) < 0){
+        printf("mergeDataStrip ftruncate1 error, %s\n", strerror(errno));
+        exit(-1);
+    }
+
+    /*
+        2.利用未丢失的数据列和行校验列恢复丢失的数据列，但是恢复数据直接写入目标文件
+          写入的位置和丢失的数据列编号有关，假如m=3，而丢失了第0列数据，
+          那么恢复的数据需要写入目标文件（目标文件有m=3个块）的开头的第一个块。
+    */
+    long restore_offest = lost_index_i * strip_size;
+    restoreOneLostDataStrip_destination(m, lost_index_i,
+                                fd_save,
+                                restore_offest,
+                                strip_size);
+
+    // 3.把其余未丢失的数据列输入目标文件
+    mergeDataStrip_destination(origin_strip_names, m, fd_save, lost_index_i, strip_size);
+
+    // 4.截掉末尾多余的0
+    long new_size = strip_size * m - padding_zero;
+    if(ftruncate(fd_save, new_size) < 0){
+        printf("mergeDataStrip ftruncate2 error, %s\n", strerror(errno));
+        exit(-1);
+    }
 }
 
 int notation(int n, int m){
@@ -1013,8 +1078,6 @@ void recursive123(int m, int lost_i, int lost_j,
                     const char* j_name,
                     const char** horizontal_syndrome_names,
                     const char** diagonal_syndrome_names){
-    
-    
     // 1.准备文件
     // 目标：i和j 两个丢失的数据列 不能使用追加写，因为s决定写哪个格子
     // 先把目标列拉长用0填充，然后再写
