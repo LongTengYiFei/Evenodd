@@ -6,7 +6,7 @@
 ```
 ./evenodd write [a file name] [a prime number]
 ```
-+ Read a file of from the system
++ Read a file from the system
 ```
 ./evenodd read [a file name] [save path]
 ```
